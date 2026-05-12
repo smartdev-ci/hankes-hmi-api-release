@@ -1,0 +1,2700 @@
+openapi: 3.0.3
+info:
+  title: HMIS API - Hankes Music Intelligence System
+  description: |
+    API REST pour le système de reconnaissance musicale HMIS.
+    
+    ## Contexte
+    HMIS permet de recenser les établissements diffusant de la musique en Côte d'Ivoire
+    (bars, maquis, caves, boîtes de nuit) et de suivre les œuvres musicales diffusées
+    afin d'améliorer la transparence dans la gestion des droits d'auteur (BURIDA).
+    
+    ## Système d'authentification
+    - Authentification par JWT avec Refresh Token (Access : 15min, Refresh : 7j)
+    - OTP SMS via Twilio pour la validation (2FA, code 6 chiffres, TTL 10min)
+    - RBAC (Role-Based Access Control) à 3 niveaux métier
+    
+    ## Rôles disponibles
+    - **admin** : Accès complet — gestion globale, analytics, rapports, utilisateurs
+    - **etablissement** : Gérant d'établissement — capture audio, profil, historique
+    - **partenaire** : BURIDA et partenaires institutionnels — consultation rapports uniquement
+    
+    ## Architecture
+    App Mobile (React Native) → API Gateway → Backend NestJS → PostgreSQL + ACRCloud/AudD
+    
+    ## Environnements
+    - Production : https://api.hmis-project.ci/v1
+    - Staging : https://staging-api.hmis-project.ci/v1
+    - Local : http://localhost:3000/v1
+  version: 2.0.0
+  contact:
+    name: HMIS Support — HANKES
+    email: contact@hmis-project.ci
+  license:
+    name: Confidentiel — HANKES Technologies
+    url: https://hmis-project.ci/license
+
+servers:
+  - url: https://api.hmis-project.ci/v1
+    description: Production
+  - url: https://staging-api.hmis-project.ci/v1
+    description: Staging
+  - url: http://localhost:3000/v1
+    description: Local Development
+
+tags:
+  - name: Authentication
+    description: Authentification JWT + OTP SMS (Twilio), gestion des sessions
+  - name: Users
+    description: Gestion des utilisateurs (admin uniquement)
+  - name: Etablissements
+    description: Recensement et gestion des établissements (bars, maquis, caves, boîtes de nuit)
+  - name: Audio
+    description: Capture audio, upload et synchronisation offline
+  - name: Reconnaissance
+    description: Identification musicale via ACRCloud (principal) et AudD (fallback)
+  - name: Diffusions
+    description: Logs de diffusion musicale — historique et statistiques
+  - name: Dashboard
+    description: KPIs, top musiques, carte géographique, évolution temporelle
+  - name: Rapports
+    description: Génération et export de rapports PDF/Excel (par période, établissement, artiste)
+  - name: Devices
+    description: Gestion des appareils mobiles React Native (Android & iOS)
+  - name: Notifications
+    description: Notifications push (FCM/APNs) et SMS
+  - name: Health & Monitoring
+    description: Santé du système et métriques Prometheus
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Token JWT obtenu après authentification.
+        Access token valide 15 minutes, signé HS256.
+        Exemple : `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`
+
+  schemas:
+
+    # ==================== AUTHENTIFICATION ====================
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: "gerant@maquis-abidjan.ci"
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: "SecurePass123!"
+        deviceId:
+          type: string
+          pattern: '^[a-zA-Z0-9\-_]{16,64}$'
+          description: |
+            Identifiant unique de l'appareil.
+            Android : Firebase Installation ID ou Android ID (UUID).
+            iOS : identifierForVendor (UUID format RFC4122).
+          example: "550e8400-e29b-41d4-a716-446655440000"
+
+    LoginResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          description: JWT Access Token signé HS256, valide 15 minutes
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        refreshToken:
+          type: string
+          description: Refresh Token hashé en base (bcrypt), valide 7 jours
+          example: "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4..."
+        expiresIn:
+          type: integer
+          description: Durée de validité de l'access token en secondes
+          example: 900
+        tokenType:
+          type: string
+          enum: [Bearer]
+        user:
+          $ref: '#/components/schemas/User'
+
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          example: "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4..."
+
+    OTPRequest:
+      type: object
+      required:
+        - phone
+        - purpose
+      properties:
+        phone:
+          type: string
+          description: |
+            Numéro de téléphone au format international E.164.
+            Côte d'Ivoire : +225XXXXXXXXXX (10 chiffres après +225)
+          pattern: '^\+[1-9]\d{7,14}$'
+          example: "+22501020304"
+        purpose:
+          type: string
+          enum: [REGISTER, LOGIN, PASSWORD_RESET, TWO_FACTOR]
+          description: |
+            REGISTER : activation du compte à l'inscription
+            LOGIN : second facteur à la connexion
+            PASSWORD_RESET : réinitialisation mot de passe
+            TWO_FACTOR : validation 2FA pour actions sensibles
+
+    OTPVerifyRequest:
+      type: object
+      required:
+        - phone
+        - otp
+      properties:
+        phone:
+          type: string
+          pattern: '^\+[1-9]\d{7,14}$'
+          example: "+22501020304"
+        otp:
+          type: string
+          minLength: 6
+          maxLength: 6
+          pattern: '^\d{6}$'
+          description: Code OTP à 6 chiffres, valide 10 minutes (stocké hashé SHA256 en Redis)
+          example: "123456"
+
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - nom
+        - telephone
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+          example: "gerant@maquis-abidjan.ci"
+        password:
+          type: string
+          minLength: 8
+          description: Sera hashé en bcrypt cost 12 avant stockage
+        nom:
+          type: string
+          maxLength: 255
+          example: "Kouassi Jean-Baptiste"
+        telephone:
+          type: string
+          pattern: '^\+[1-9]\d{7,14}$'
+          description: Utilisé pour l'envoi OTP (Twilio)
+          example: "+22501020304"
+        role:
+          type: string
+          enum: [admin, etablissement, partenaire]
+          default: etablissement
+
+    PasswordResetRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+
+    PasswordResetConfirmRequest:
+      type: object
+      required:
+        - token
+        - newPassword
+      properties:
+        token:
+          type: string
+          description: Token de réinitialisation reçu par email (SES)
+        newPassword:
+          type: string
+          minLength: 8
+
+    ChangePasswordRequest:
+      type: object
+      required:
+        - currentPassword
+        - newPassword
+      properties:
+        currentPassword:
+          type: string
+          minLength: 8
+        newPassword:
+          type: string
+          minLength: 8
+
+    # ==================== UTILISATEURS ====================
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        nom:
+          type: string
+        telephone:
+          type: string
+        role:
+          type: string
+          enum: [admin, etablissement, partenaire]
+        actif:
+          type: boolean
+        telephoneVerifie:
+          type: boolean
+          description: OTP SMS validé
+        dernierLoginAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    UserCreate:
+      type: object
+      required:
+        - email
+        - password
+        - nom
+        - telephone
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        nom:
+          type: string
+          maxLength: 255
+        telephone:
+          type: string
+          pattern: '^\+[1-9]\d{7,14}$'
+        role:
+          type: string
+          enum: [admin, etablissement, partenaire]
+
+    UserUpdate:
+      type: object
+      properties:
+        nom:
+          type: string
+          maxLength: 255
+        telephone:
+          type: string
+          pattern: '^\+[1-9]\d{7,14}$'
+        role:
+          type: string
+          enum: [admin, etablissement, partenaire]
+        actif:
+          type: boolean
+
+    # ==================== ETABLISSEMENTS ====================
+
+    Etablissement:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        utilisateurId:
+          type: string
+          format: uuid
+          description: Propriétaire / gérant du compte
+        nom:
+          type: string
+          example: "Maquis Le Bélier"
+        type:
+          type: string
+          enum: [bar, maquis, cave, boite_nuit, restaurant, hotel, espace_evenementiel, autre]
+        adresse:
+          type: string
+          example: "Rue des Jardins, Cocody"
+        commune:
+          type: string
+          example: "Cocody"
+        ville:
+          type: string
+          default: "Abidjan"
+          example: "Abidjan"
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+          nullable: true
+          example: 5.3599517
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+          nullable: true
+          example: -4.0082563
+        telephone:
+          type: string
+          nullable: true
+        capaciteAccueil:
+          type: integer
+          minimum: 1
+          nullable: true
+          example: 150
+        statut:
+          type: string
+          enum: [en_attente, actif, suspendu, inactif]
+          description: |
+            en_attente : soumis, en attente de validation admin
+            actif : validé, tracking musical activé
+            suspendu : temporairement désactivé
+            inactif : fermé définitivement
+        valideParId:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID de l'admin ayant validé le compte
+        dateValidation:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    EtablissementCreate:
+      type: object
+      required:
+        - nom
+        - type
+        - adresse
+        - commune
+      properties:
+        nom:
+          type: string
+          maxLength: 255
+          example: "Maquis Le Bélier"
+        type:
+          type: string
+          enum: [bar, maquis, cave, boite_nuit, restaurant, hotel, espace_evenementiel, autre]
+        adresse:
+          type: string
+          example: "Rue des Jardins, Cocody"
+        commune:
+          type: string
+          example: "Cocody"
+        ville:
+          type: string
+          default: "Abidjan"
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+          example: 5.3599517
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+          example: -4.0082563
+        telephone:
+          type: string
+          pattern: '^\+[1-9]\d{7,14}$'
+        capaciteAccueil:
+          type: integer
+          minimum: 1
+
+    EtablissementUpdate:
+      type: object
+      properties:
+        nom:
+          type: string
+          maxLength: 255
+        type:
+          type: string
+          enum: [bar, maquis, cave, boite_nuit, restaurant, hotel, espace_evenementiel, autre]
+        adresse:
+          type: string
+        commune:
+          type: string
+        ville:
+          type: string
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+        telephone:
+          type: string
+          pattern: '^\+[1-9]\d{7,14}$'
+        capaciteAccueil:
+          type: integer
+          minimum: 1
+
+    EtablissementStats:
+      type: object
+      properties:
+        etablissementId:
+          type: string
+          format: uuid
+        totalDiffusions:
+          type: integer
+          description: Nombre total de diffusions identifiées
+        tauxReconnaissance:
+          type: number
+          format: float
+          description: Pourcentage de captures identifiées (objectif > 80%)
+          example: 87.4
+        topMusiques:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopMusique'
+          maxItems: 10
+        topArtistes:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopArtiste'
+          maxItems: 10
+        diffusionsParJour:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiffusionJour'
+        periode:
+          $ref: '#/components/schemas/Periode'
+
+    # ==================== APPAREILS MOBILES ====================
+
+    Device:
+      type: object
+      description: Smartphone React Native (Android ou iOS) utilisé par un gérant d'établissement
+      properties:
+        id:
+          type: string
+          format: uuid
+        utilisateurId:
+          type: string
+          format: uuid
+        deviceId:
+          type: string
+          pattern: '^[a-zA-Z0-9\-_]{16,64}$'
+          description: |
+            Identifiant unique matériel de l'appareil.
+            Android : Firebase Installation ID ou Android ID (UUID).
+            iOS : UIDevice.identifierForVendor (UUID format RFC4122).
+            Généré une seule fois à l'installation de l'app, persisté via react-native-keychain.
+        plateforme:
+          type: string
+          enum: [android, ios]
+          description: Système d'exploitation du smartphone
+        versionOs:
+          type: string
+          description: Version du système d'exploitation
+          example: "Android 14"
+        versionApp:
+          type: string
+          pattern: '^\d+\.\d+\.\d+$'
+          description: Version de l'application HMIS installée (semver)
+          example: "1.2.0"
+        modele:
+          type: string
+          description: Modèle du smartphone (optionnel, collecté à l'enregistrement)
+          nullable: true
+          example: "Samsung Galaxy A54"
+        pushToken:
+          type: string
+          description: |
+            Token de notification push.
+            Android : Firebase Cloud Messaging (FCM) token.
+            iOS : Apple Push Notification service (APNs) token.
+            Doit être mis à jour à chaque lancement de l'application.
+          nullable: true
+        actif:
+          type: boolean
+          description: Appareil actif et autorisé à capturer
+          default: true
+        dernierVuAt:
+          type: string
+          format: date-time
+          description: Dernière activité détectée (heartbeat ou synchronisation)
+        enregistreAt:
+          type: string
+          format: date-time
+
+    DeviceRegister:
+      type: object
+      required:
+        - deviceId
+        - plateforme
+        - versionOs
+        - versionApp
+      properties:
+        deviceId:
+          type: string
+          pattern: '^[a-zA-Z0-9\-_]{16,64}$'
+          description: |
+            Identifiant unique de l'appareil, persisté via react-native-keychain (iOS Keychain / Android Keystore).
+            Android : Firebase Installation ID ou Android ID.
+            iOS : UIDevice.identifierForVendor.
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        plateforme:
+          type: string
+          enum: [android, ios]
+        versionOs:
+          type: string
+          example: "Android 14"
+        versionApp:
+          type: string
+          pattern: '^\d+\.\d+\.\d+$'
+          example: "1.2.0"
+        modele:
+          type: string
+          nullable: true
+          example: "Samsung Galaxy A54"
+        pushToken:
+          type: string
+          description: |
+            FCM token (Android) ou APNs token (iOS).
+            Requis pour la réception des notifications push.
+          nullable: true
+
+    DeviceUpdate:
+      type: object
+      description: Mise à jour à envoyer à chaque lancement de l'application
+      properties:
+        versionApp:
+          type: string
+          pattern: '^\d+\.\d+\.\d+$'
+          description: Nouvelle version de l'app si mise à jour effectuée
+        versionOs:
+          type: string
+          description: Nouvelle version OS si mise à jour effectuée
+        pushToken:
+          type: string
+          description: |
+            Nouveau push token si régénéré par FCM/APNs.
+            Les tokens push sont régulièrement renouvelés par les OS mobiles.
+          nullable: true
+
+    # ==================== AUDIO & CAPTURE ====================
+
+    AudioUpload:
+      type: object
+      required:
+        - etablissementId
+        - deviceId
+        - audioBase64
+        - timestampCapture
+        - dureeSecondes
+      properties:
+        etablissementId:
+          type: string
+          format: uuid
+          description: Identifiant de l'établissement où la capture a été effectuée
+        deviceId:
+          type: string
+          pattern: '^[a-zA-Z0-9\-_]{16,64}$'
+          description: Identifiant de l'appareil ayant effectué la capture
+        audioBase64:
+          type: string
+          format: byte
+          description: |
+            Extrait audio encodé en base64.
+            Format source : WAV, 44100 Hz, mono (react-native-audio-recorder-player).
+            Durée : 30 à 45 secondes recommandé (calibré pour ACRCloud/AudD).
+            Taille max décodée : 5 MB (≈ 700 000 caractères base64).
+          maxLength: 700000
+        dureeSecondes:
+          type: integer
+          minimum: 10
+          maximum: 60
+          description: Durée de l'extrait audio en secondes
+          example: 45
+        timestampCapture:
+          type: string
+          format: date-time
+          description: |
+            Horodatage exact de la capture, généré côté appareil.
+            Utilisé comme timestamp_diffusion si reconnaissance réussie.
+        referenceLocale:
+          type: string
+          maxLength: 64
+          description: |
+            Identifiant unique côté appareil (UUID v4 généré localement).
+            Utilisé par le backend pour la déduplication lors des synchronisations batch.
+          example: "local-cap-7f3a2b1c-4d5e-6f7a-8b9c-0d1e2f3a4b5c"
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+          description: Position GPS au moment de la capture (react-native-geolocation-service)
+          example: 5.3599517
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+          example: -4.0082563
+
+    AudioSyncRequest:
+      type: object
+      required:
+        - captures
+      description: |
+        Synchronisation batch des captures effectuées en mode offline (WatermelonDB → API).
+        Déclenché automatiquement par react-native-background-fetch à la reconnexion réseau.
+        Maximum 50 captures par batch.
+      properties:
+        captures:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/AudioUpload'
+          description: Liste des captures offline à synchroniser, triées par timestampCapture ASC
+
+    AudioSyncResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Nombre total de captures reçues dans le batch
+        traiteesOk:
+          type: integer
+          description: Captures acceptées et mises en queue de reconnaissance
+        doublons:
+          type: integer
+          description: Captures ignorées car déjà synchronisées (déduplication via referenceLocale)
+        erreurs:
+          type: integer
+          description: Captures rejetées (format invalide, taille dépassée, etc.)
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              referenceLocale:
+                type: string
+              statut:
+                type: string
+                enum: [acceptee, doublon, erreur]
+              captureId:
+                type: string
+                format: uuid
+                nullable: true
+                description: ID attribué par le backend si acceptée
+              message:
+                type: string
+                nullable: true
+
+    AudioConfig:
+      type: object
+      description: Configuration de capture audio à télécharger par l'application mobile au démarrage
+      properties:
+        intervalleCaptureSec:
+          type: integer
+          description: Intervalle entre deux captures en secondes (30 à 60 selon charge serveur)
+          minimum: 30
+          maximum: 60
+          example: 30
+        dureeExtrait:
+          type: integer
+          description: Durée de chaque extrait à capturer en secondes
+          minimum: 10
+          maximum: 45
+          example: 45
+        formatAudio:
+          type: string
+          enum: [wav, aac]
+          description: Format audio attendu par le backend (WAV recommandé pour meilleure reconnaissance)
+          default: wav
+        tailleMaxOctetsDecode:
+          type: integer
+          description: Taille maximale du fichier audio décodé en octets
+          example: 5242880
+        maxCapturesOffline:
+          type: integer
+          description: Nombre maximum de captures à conserver en local (WatermelonDB) avant d'alerter l'utilisateur
+          example: 200
+        retentionLocaleJours:
+          type: integer
+          description: Durée de conservation des captures en local avant purge automatique
+          example: 7
+
+    # ==================== RECONNAISSANCE MUSICALE ====================
+
+    Diffusion:
+      type: object
+      description: Log de diffusion musicale identifiée, stocké en PostgreSQL
+      properties:
+        id:
+          type: string
+          format: uuid
+        etablissementId:
+          type: string
+          format: uuid
+        captureId:
+          type: string
+          format: uuid
+          description: Référence à la capture audio source (table captures)
+        timestampDiffusion:
+          type: string
+          format: date-time
+          description: Horodatage exact de la diffusion (= timestampCapture de l'audio)
+        dureeSecondes:
+          type: integer
+          description: Durée de l'extrait identifié en secondes
+        scoreConfiance:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: "Score de fiabilité de la reconnaissance (seuil minimum : 0.60)"
+          example: 0.94
+        titre:
+          type: string
+          example: "Gbagbe Dje"
+        artiste:
+          type: string
+          example: "Dj Arafat"
+        album:
+          type: string
+          nullable: true
+        isrc:
+          type: string
+          maxLength: 20
+          nullable: true
+          description: Code ISRC standard d'identification de l'enregistrement (utilisé pour les droits BURIDA)
+          example: "CIX202400001"
+        label:
+          type: string
+          nullable: true
+          example: "Yorogang Records"
+        genre:
+          type: string
+          nullable: true
+          example: "Coupé-Décalé"
+        anneeSortie:
+          type: integer
+          nullable: true
+          example: 2019
+        sourceApi:
+          type: string
+          enum: [acrcloud, audd]
+          description: API de reconnaissance ayant identifié la diffusion
+        createdAt:
+          type: string
+          format: date-time
+
+    DiffusionStatut:
+      type: object
+      description: Statut d'une capture en cours de traitement
+      properties:
+        captureId:
+          type: string
+          format: uuid
+        statut:
+          type: string
+          enum: [en_attente, en_traitement, identifie, non_identifie, erreur]
+          description: |
+            en_attente : dans la Bull Queue, en attente de worker disponible
+            en_traitement : worker actif, appel ACRCloud/AudD en cours
+            identifie : reconnaissance réussie (score >= 0.60), log créé en base
+            non_identifie : musique inconnue ou score < seuil — capture ignorée
+            erreur : échec technique (timeout, format invalide, quota API dépassé)
+        diffusionId:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID du log créé si statut = identifie
+        scoreConfiance:
+          type: number
+          format: float
+          nullable: true
+        sourceApi:
+          type: string
+          enum: [acrcloud, audd]
+          nullable: true
+        messageErreur:
+          type: string
+          nullable: true
+          description: Détail de l'erreur technique si statut = erreur
+        traitéAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    # ==================== DASHBOARD & ANALYTICS ====================
+
+    DashboardKPIs:
+      type: object
+      description: Indicateurs clés pour le dashboard admin HANKES
+      properties:
+        totalEtablissements:
+          type: integer
+          description: Nombre total d'établissements enregistrés
+        etablissementsActifs:
+          type: integer
+          description: Établissements avec statut = actif
+        etablissementsEnAttente:
+          type: integer
+          description: Établissements en attente de validation admin
+        totalDiffusionsAujourdhui:
+          type: integer
+          description: Diffusions identifiées sur les dernières 24h
+        totalDiffusionsSemaine:
+          type: integer
+          description: Diffusions identifiées sur les 7 derniers jours
+        tauxReconnaissanceGlobal:
+          type: number
+          format: float
+          description: Taux de reconnaissance global toutes captures confondues (objectif > 80%)
+          example: 83.2
+        topMusiquesJour:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopMusique'
+          maxItems: 10
+        topArtistesJour:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopArtiste'
+          maxItems: 10
+        evolutionDiffusions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiffusionJour'
+          description: Évolution du nombre de diffusions sur les 30 derniers jours
+
+    TopMusique:
+      type: object
+      properties:
+        rang:
+          type: integer
+          example: 1
+        titre:
+          type: string
+          example: "Gbagbe Dje"
+        artiste:
+          type: string
+          example: "Dj Arafat"
+        isrc:
+          type: string
+          nullable: true
+        nombreDiffusions:
+          type: integer
+          example: 342
+        nombreEtablissements:
+          type: integer
+          description: Nombre d'établissements distincts ayant diffusé ce titre
+          example: 28
+
+    TopArtiste:
+      type: object
+      properties:
+        rang:
+          type: integer
+        artiste:
+          type: string
+          example: "Dj Arafat"
+        nombreTitres:
+          type: integer
+          description: Nombre de titres distincts identifiés
+        nombreDiffusions:
+          type: integer
+          description: Total de diffusions toutes chansons confondues
+          example: 1204
+
+    DiffusionJour:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+          example: "2026-04-15"
+        nombreDiffusions:
+          type: integer
+          example: 87
+        tauxReconnaissance:
+          type: number
+          format: float
+          example: 82.1
+
+    CarteEtablissement:
+      type: object
+      description: Point cartographique pour la carte Leaflet.js du dashboard
+      properties:
+        id:
+          type: string
+          format: uuid
+        nom:
+          type: string
+        type:
+          type: string
+          enum: [bar, maquis, cave, boite_nuit, restaurant, hotel, espace_evenementiel, autre]
+        commune:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        statut:
+          type: string
+          enum: [en_attente, actif, suspendu, inactif]
+        diffusionsAujourdhui:
+          type: integer
+          description: Diffusions identifiées dans les dernières 24h
+        derniereActiviteAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    # ==================== RAPPORTS ====================
+
+    RapportCreate:
+      type: object
+      required:
+        - type
+        - dateDebut
+        - dateFin
+      description: |
+        Génération asynchrone via Bull Queue + PDFKit (PDF) ou ExcelJS (Excel).
+        Le rapport est généré en arrière-plan et stocké sur AWS S3.
+      properties:
+        type:
+          type: string
+          enum: [par_periode, par_etablissement, par_artiste, global_burida]
+          description: |
+            par_periode : toutes diffusions sur la période
+            par_etablissement : détail par établissement
+            par_artiste : classement et totaux par artiste/ISRC
+            global_burida : rapport consolidé pour transmission au BURIDA
+        dateDebut:
+          type: string
+          format: date
+          example: "2026-01-01"
+        dateFin:
+          type: string
+          format: date
+          example: "2026-03-31"
+        etablissementId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Filtrer sur un établissement précis (requis si type = par_etablissement)
+        artiste:
+          type: string
+          nullable: true
+          description: Filtrer sur un artiste précis (requis si type = par_artiste)
+        formatExport:
+          type: string
+          enum: [pdf, excel]
+          default: pdf
+          description: PDF via PDFKit (serveur) ou Excel via ExcelJS (serveur)
+
+    Rapport:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [par_periode, par_etablissement, par_artiste, global_burida]
+        statut:
+          type: string
+          enum: [en_attente, en_generation, pret, erreur]
+        dateDebut:
+          type: string
+          format: date
+        dateFin:
+          type: string
+          format: date
+        formatExport:
+          type: string
+          enum: [pdf, excel]
+        urlTelechargement:
+          type: string
+          format: uri
+          nullable: true
+          description: URL S3 pré-signée, valide 24h (générée à la demande de téléchargement)
+        tailleOctets:
+          type: integer
+          nullable: true
+        nombreLignes:
+          type: integer
+          nullable: true
+          description: Nombre de diffusions incluses dans le rapport
+        genereParId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        pretAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    # ==================== PERIODE (réutilisable) ====================
+
+    Periode:
+      type: object
+      properties:
+        dateDebut:
+          type: string
+          format: date
+        dateFin:
+          type: string
+          format: date
+
+    # ==================== NOTIFICATIONS ====================
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        utilisateurId:
+          type: string
+          format: uuid
+        deviceId:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            Si non null, notification envoyée sur un appareil précis via FCM/APNs.
+            Si null, notification broadcast à tous les appareils actifs de l'utilisateur.
+        titre:
+          type: string
+          example: "Synchronisation terminée"
+        message:
+          type: string
+          example: "47 captures synchronisées avec succès."
+        type:
+          type: string
+          enum: [info, succes, alerte, erreur]
+        lu:
+          type: boolean
+          default: false
+        luAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    # ==================== ERREURS STANDARD ====================
+
+    ErrorResponse:
+      type: object
+      properties:
+        statusCode:
+          type: integer
+          example: 400
+        message:
+          type: string
+          example: "Données invalides"
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+          description: Détail des erreurs de validation (class-validator)
+        traceId:
+          type: string
+          description: CorrelationId injecté par CorrelationIdMiddleware pour le suivi distribué
+          example: "trace_a1b2c3d4"
+        timestamp:
+          type: string
+          format: date-time
+
+    # ==================== PAGINATION ====================
+
+    PaginatedResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items: {}
+        meta:
+          type: object
+          properties:
+            total:
+              type: integer
+              description: Nombre total d'éléments
+            page:
+              type: integer
+              description: Page courante (1-indexé)
+            limit:
+              type: integer
+              description: Éléments par page
+            totalPages:
+              type: integer
+
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    LimitParam:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    DateDebutParam:
+      name: dateDebut
+      in: query
+      schema:
+        type: string
+        format: date
+      example: "2026-01-01"
+    DateFinParam:
+      name: dateFin
+      in: query
+      schema:
+        type: string
+        format: date
+      example: "2026-03-31"
+
+  responses:
+    Unauthorized:
+      description: Token JWT absent, invalide ou expiré
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Rôle insuffisant pour cette action (RBAC)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Ressource introuvable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ValidationError:
+      description: Erreur de validation des données (class-validator)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooManyRequests:
+      description: |
+        Rate limiting ThrottlerGuard NestJS dépassé.
+        Global : 100 req/min par IP.
+        /auth/login : 5 req/min.
+        /auth/otp/* : 3 req/min.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+
+security:
+  - bearerAuth: []
+
+paths:
+
+  # ==================== AUTHENTIFICATION ====================
+
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: Inscription d'un nouvel utilisateur
+      description: |
+        Crée un compte utilisateur. Le mot de passe est hashé en bcrypt (cost 12).
+        Un OTP SMS est envoyé via Twilio pour valider le numéro de téléphone.
+        Après inscription, le compte doit être validé par OTP avant toute connexion.
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Compte créé, OTP SMS envoyé
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Compte créé. Un code OTP a été envoyé au +22501020304."
+                  userId:
+                    type: string
+                    format: uuid
+                  otpExpireIn:
+                    type: integer
+                    example: 600
+                    description: Durée de validité de l'OTP en secondes (10 minutes)
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          description: Email ou téléphone déjà utilisé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Connexion utilisateur
+      description: |
+        Authentifie un utilisateur et retourne les tokens JWT.
+        Access token valide 15 minutes (HS256), refresh token 7 jours.
+        Rate limité à 5 tentatives/minute par IP.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Connexion réussie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          description: Identifiants invalides
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Compte non vérifié (OTP en attente) ou suspendu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Déconnexion
+      description: |
+        Invalide le refresh token en base (hash effacé).
+        Le push token de l'appareil est conservé mais désactivé jusqu'à la prochaine connexion.
+      operationId: logout
+      responses:
+        '200':
+          description: Déconnexion réussie
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Déconnexion réussie"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Rafraîchir le token
+      description: |
+        Génère un nouveau access token à partir du refresh token.
+        Le refresh token est validé par comparaison de hash en base.
+        Un nouveau refresh token est également émis (rotation).
+      operationId: refreshToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Tokens rafraîchis avec succès
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Refresh token invalide, expiré ou révoqué
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/otp/envoyer:
+    post:
+      tags: [Authentication]
+      summary: Envoyer un OTP SMS
+      description: |
+        Envoie un code OTP à 6 chiffres par SMS via Twilio.
+        Le code est stocké hashé (SHA256) en Redis avec TTL 10 minutes.
+        Rate limité à 3 requêtes/minute par IP.
+      operationId: sendOTP
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OTPRequest'
+      responses:
+        '200':
+          description: OTP envoyé avec succès
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Code OTP envoyé au +22501020304"
+                  expireInSeconds:
+                    type: integer
+                    example: 600
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/otp/verifier:
+    post:
+      tags: [Authentication]
+      summary: Vérifier un OTP SMS
+      description: |
+        Vérifie le code OTP reçu par SMS.
+        Compare le hash SHA256 du code saisi avec celui stocké en Redis.
+        En cas de succès : active le compte (purpose=REGISTER) ou émet un JWT (purpose=LOGIN).
+      operationId: verifyOTP
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OTPVerifyRequest'
+      responses:
+        '200':
+          description: OTP valide
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Numéro vérifié avec succès"
+                  tokens:
+                    $ref: '#/components/schemas/LoginResponse'
+                    nullable: true
+                    description: Présent uniquement si purpose = LOGIN ou TWO_FACTOR
+        '400':
+          description: Code OTP invalide ou expiré
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/password/reset:
+    post:
+      tags: [Authentication]
+      summary: Demander la réinitialisation du mot de passe
+      description: Envoie un lien de réinitialisation par email via AWS SES
+      operationId: requestPasswordReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        '200':
+          description: Email envoyé (réponse identique si email inconnu, pour éviter l'énumération)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Si cet email existe, un lien de réinitialisation a été envoyé."
+
+  /auth/password/reset/confirmer:
+    post:
+      tags: [Authentication]
+      summary: Confirmer la réinitialisation du mot de passe
+      operationId: confirmPasswordReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirmRequest'
+      responses:
+        '200':
+          description: Mot de passe réinitialisé avec succès
+        '400':
+          description: Token invalide ou expiré
+
+  /auth/me:
+    get:
+      tags: [Authentication]
+      summary: Profil de l'utilisateur connecté
+      operationId: getMe
+      responses:
+        '200':
+          description: Profil utilisateur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/changer-password:
+    patch:
+      tags: [Authentication]
+      summary: Changer son mot de passe
+      operationId: changePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: Mot de passe modifié, tous les refresh tokens révoqués
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==================== UTILISATEURS ====================
+
+  /utilisateurs:
+    get:
+      tags: [Users]
+      summary: Lister les utilisateurs
+      description: Accessible admin uniquement
+      operationId: listUsers
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [admin, etablissement, partenaire]
+        - name: actif
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Liste paginée des utilisateurs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [Users]
+      summary: Créer un utilisateur
+      description: Accessible admin uniquement
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+      responses:
+        '201':
+          description: Utilisateur créé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /utilisateurs/{userId}:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Users]
+      summary: Détail d'un utilisateur
+      operationId: getUser
+      responses:
+        '200':
+          description: Détail utilisateur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Users]
+      summary: Modifier un utilisateur
+      operationId: updateUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+      responses:
+        '200':
+          description: Utilisateur mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Users]
+      summary: Supprimer un utilisateur
+      description: Désactivation logique (actif = false), pas de suppression physique
+      operationId: deleteUser
+      responses:
+        '200':
+          description: Utilisateur désactivé
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== ETABLISSEMENTS ====================
+
+  /etablissements:
+    get:
+      tags: [Etablissements]
+      summary: Lister les établissements
+      description: |
+        admin : tous les établissements avec filtres.
+        etablissement : uniquement ses propres établissements.
+        partenaire : établissements actifs uniquement.
+      operationId: listEtablissements
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: statut
+          in: query
+          schema:
+            type: string
+            enum: [en_attente, actif, suspendu, inactif]
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [bar, maquis, cave, boite_nuit, restaurant, hotel, espace_evenementiel, autre]
+        - name: ville
+          in: query
+          schema:
+            type: string
+            example: "Abidjan"
+        - name: commune
+          in: query
+          schema:
+            type: string
+            example: "Cocody"
+      responses:
+        '200':
+          description: Liste paginée des établissements
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Etablissement'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Etablissements]
+      summary: Créer un établissement
+      description: |
+        Accessible par les utilisateurs avec rôle etablissement.
+        Le statut est automatiquement mis à en_attente.
+        Un admin doit ensuite valider l'établissement.
+      operationId: createEtablissement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EtablissementCreate'
+      responses:
+        '201':
+          description: Établissement créé, en attente de validation admin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Etablissement'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /etablissements/{etablissementId}:
+    parameters:
+      - name: etablissementId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Etablissements]
+      summary: Détail d'un établissement
+      operationId: getEtablissement
+      responses:
+        '200':
+          description: Détail de l'établissement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Etablissement'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Etablissements]
+      summary: Modifier un établissement
+      operationId: updateEtablissement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EtablissementUpdate'
+      responses:
+        '200':
+          description: Établissement mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Etablissement'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /etablissements/{etablissementId}/valider:
+    post:
+      tags: [Etablissements]
+      summary: Valider un établissement
+      description: Accessible admin uniquement. Passe le statut de en_attente à actif et active le tracking.
+      operationId: validerEtablissement
+      parameters:
+        - name: etablissementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Établissement validé et tracking activé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Etablissement'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /etablissements/{etablissementId}/suspendre:
+    post:
+      tags: [Etablissements]
+      summary: Suspendre un établissement
+      description: Accessible admin uniquement. Passe le statut à suspendu et suspend le tracking.
+      operationId: suspendrEtablissement
+      parameters:
+        - name: etablissementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                motif:
+                  type: string
+                  description: Motif de suspension (sera notifié au gérant)
+      responses:
+        '200':
+          description: Établissement suspendu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Etablissement'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /etablissements/{etablissementId}/stats:
+    get:
+      tags: [Etablissements]
+      summary: Statistiques d'un établissement
+      operationId: getEtablissementStats
+      parameters:
+        - name: etablissementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/DateDebutParam'
+        - $ref: '#/components/parameters/DateFinParam'
+      responses:
+        '200':
+          description: Statistiques de l'établissement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EtablissementStats'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /etablissements/{etablissementId}/diffusions:
+    get:
+      tags: [Etablissements]
+      summary: Historique des diffusions d'un établissement
+      description: |
+        Accessible par le gérant de l'établissement, l'admin et le partenaire.
+        Indexé sur (etablissement_id, timestamp_diffusion DESC) pour performances optimales.
+      operationId: getEtablissementDiffusions
+      parameters:
+        - name: etablissementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/DateDebutParam'
+        - $ref: '#/components/parameters/DateFinParam'
+        - name: artiste
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Historique paginé des diffusions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Diffusion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== AUDIO & CAPTURE ====================
+
+  /audio/config:
+    get:
+      tags: [Audio]
+      summary: Configuration de capture audio
+      description: |
+        Téléchargée par l'application mobile au démarrage et mise en cache (React Query).
+        Permet d'ajuster l'intervalle de capture, le format audio et les limites offline
+        sans mise à jour de l'application.
+      operationId: getAudioConfig
+      responses:
+        '200':
+          description: Configuration de capture
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioConfig'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /audio/capturer:
+    post:
+      tags: [Audio]
+      summary: Uploader un extrait audio
+      description: |
+        Reçoit un extrait audio depuis l'application mobile.
+        Valide le format et la taille, stocke temporairement sur S3 (TTL 24h),
+        puis ajoute un job dans la Bull Queue pour traitement asynchrone par ReconnaissanceWorker.
+        
+        Format attendu : WAV 44100Hz mono (react-native-audio-recorder-player).
+        Taille max décodée : 5 MB.
+      operationId: uploadAudio
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AudioUpload'
+      responses:
+        '202':
+          description: Capture acceptée et mise en queue de reconnaissance
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  captureId:
+                    type: string
+                    format: uuid
+                    description: ID à utiliser pour suivre le statut via GET /audio/statut/{captureId}
+                  message:
+                    type: string
+                    example: "Capture reçue et en cours de traitement"
+                  queuePosition:
+                    type: integer
+                    description: Position dans la Bull Queue (informatif)
+        '400':
+          description: Format audio invalide, taille dépassée ou données manquantes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Établissement suspendu ou inactif
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /audio/sync:
+    post:
+      tags: [Audio]
+      summary: Synchronisation batch offline
+      description: |
+        Endpoint de synchronisation déclenché par react-native-background-fetch
+        lors de la reconnexion réseau après une période offline (WatermelonDB SQLite local).
+        
+        Accepte jusqu'à 50 captures par batch.
+        Déduplication via referenceLocale (chaque appareil génère un UUID local unique par capture).
+        Retourne un statut par capture (HTTP 207 Multi-Status).
+      operationId: syncAudio
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AudioSyncRequest'
+      responses:
+        '207':
+          description: Multi-Status — résultat détaillé par capture
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioSyncResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /audio/statut/{captureId}:
+    get:
+      tags: [Audio]
+      summary: Statut de traitement d'une capture
+      description: |
+        Permet à l'application mobile de suivre le traitement asynchrone d'une capture.
+        Utiliser en polling (React Query avec refetch interval de 5s max).
+      operationId: getCaptureStatus
+      parameters:
+        - name: captureId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Statut de la capture
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiffusionStatut'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== DIFFUSIONS ====================
+
+  /diffusions:
+    get:
+      tags: [Diffusions]
+      summary: Lister les diffusions musicales
+      description: |
+        admin : toutes les diffusions.
+        partenaire : toutes les diffusions (lecture seule, pour rapports BURIDA).
+        etablissement : uniquement ses propres diffusions.
+        Indexé sur (etablissement_id, timestamp_diffusion DESC) et (artiste, timestamp_diffusion DESC).
+      operationId: listDiffusions
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/DateDebutParam'
+        - $ref: '#/components/parameters/DateFinParam'
+        - name: etablissementId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: artiste
+          in: query
+          schema:
+            type: string
+        - name: isrc
+          in: query
+          schema:
+            type: string
+          description: Filtrer par code ISRC (traçabilité des œuvres pour BURIDA)
+        - name: sourceApi
+          in: query
+          schema:
+            type: string
+            enum: [acrcloud, audd]
+      responses:
+        '200':
+          description: Liste paginée des diffusions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Diffusion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /diffusions/{diffusionId}:
+    get:
+      tags: [Diffusions]
+      summary: Détail d'une diffusion
+      operationId: getDiffusion
+      parameters:
+        - name: diffusionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Détail de la diffusion
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Diffusion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== DASHBOARD ====================
+
+  /dashboard/kpis:
+    get:
+      tags: [Dashboard]
+      summary: Indicateurs clés du dashboard
+      description: Accessible admin uniquement. Données agrégées depuis PostgreSQL (cache Redis optionnel Phase 2).
+      operationId: getDashboardKPIs
+      responses:
+        '200':
+          description: KPIs du dashboard
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardKPIs'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /dashboard/carte:
+    get:
+      tags: [Dashboard]
+      summary: Données cartographiques des établissements
+      description: |
+        Retourne les points GPS de tous les établissements pour la carte Leaflet.js.
+        Indexé sur (statut, ville, commune) et (latitude, longitude).
+      operationId: getDashboardCarte
+      parameters:
+        - name: statut
+          in: query
+          schema:
+            type: string
+            enum: [en_attente, actif, suspendu, inactif]
+        - name: ville
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Points cartographiques
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  etablissements:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CarteEtablissement'
+                  total:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /dashboard/top-musiques:
+    get:
+      tags: [Dashboard]
+      summary: Top des musiques les plus diffusées
+      operationId: getTopMusiques
+      parameters:
+        - $ref: '#/components/parameters/DateDebutParam'
+        - $ref: '#/components/parameters/DateFinParam'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 5
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Classement des musiques
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  classement:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TopMusique'
+                  periode:
+                    $ref: '#/components/schemas/Periode'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /dashboard/top-artistes:
+    get:
+      tags: [Dashboard]
+      summary: Top des artistes les plus diffusés
+      operationId: getTopArtistes
+      parameters:
+        - $ref: '#/components/parameters/DateDebutParam'
+        - $ref: '#/components/parameters/DateFinParam'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 5
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Classement des artistes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  classement:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TopArtiste'
+                  periode:
+                    $ref: '#/components/schemas/Periode'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /dashboard/evolution:
+    get:
+      tags: [Dashboard]
+      summary: Évolution temporelle des diffusions
+      operationId: getDashboardEvolution
+      parameters:
+        - $ref: '#/components/parameters/DateDebutParam'
+        - $ref: '#/components/parameters/DateFinParam'
+        - name: granularite
+          in: query
+          schema:
+            type: string
+            enum: [jour, semaine, mois]
+            default: jour
+      responses:
+        '200':
+          description: Évolution des diffusions par période
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  evolution:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DiffusionJour'
+                  periode:
+                    $ref: '#/components/schemas/Periode'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ==================== RAPPORTS ====================
+
+  /rapports:
+    get:
+      tags: [Rapports]
+      summary: Lister les rapports générés
+      operationId: listRapports
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: statut
+          in: query
+          schema:
+            type: string
+            enum: [en_attente, en_generation, pret, erreur]
+      responses:
+        '200':
+          description: Liste des rapports
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Rapport'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [Rapports]
+      summary: Générer un rapport
+      description: |
+        Lance la génération asynchrone d'un rapport via Bull Queue.
+        PDF généré via PDFKit côté serveur, Excel via ExcelJS.
+        Le rapport est stocké sur AWS S3 et accessible via URL pré-signée (24h).
+      operationId: createRapport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RapportCreate'
+      responses:
+        '202':
+          description: Génération lancée en arrière-plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rapport'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /rapports/{rapportId}:
+    get:
+      tags: [Rapports]
+      summary: Détail et statut d'un rapport
+      operationId: getRapport
+      parameters:
+        - name: rapportId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Détail du rapport
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rapport'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /rapports/{rapportId}/telecharger:
+    get:
+      tags: [Rapports]
+      summary: Télécharger un rapport
+      description: |
+        Retourne une URL S3 pré-signée valide 24h pour le téléchargement du fichier PDF ou Excel.
+        Le rapport doit avoir le statut = pret.
+      operationId: downloadRapport
+      parameters:
+        - name: rapportId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: URL de téléchargement S3 pré-signée
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  urlTelechargement:
+                    type: string
+                    format: uri
+                    description: URL S3 pré-signée, valide 24h
+                  expireAt:
+                    type: string
+                    format: date-time
+                  nomFichier:
+                    type: string
+                    example: "rapport_burida_2026-T1.pdf"
+        '400':
+          description: Rapport pas encore prêt (statut != pret)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== APPAREILS MOBILES ====================
+
+  /devices:
+    get:
+      tags: [Devices]
+      summary: Lister les appareils de l'utilisateur connecté
+      operationId: listDevices
+      responses:
+        '200':
+          description: Liste des appareils enregistrés
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Device'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Devices]
+      summary: Enregistrer un appareil mobile
+      description: |
+        Appelé lors de la première installation ou réinstallation de l'app HMIS.
+        Si deviceId existe déjà, met à jour le pushToken et la version de l'app (upsert).
+        Le deviceId est persisté côté appareil via react-native-keychain (iOS Keychain / Android Keystore).
+      operationId: registerDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceRegister'
+      responses:
+        '200':
+          description: Appareil enregistré ou mis à jour (upsert sur deviceId)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /devices/{deviceId}:
+    parameters:
+      - name: deviceId
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[a-zA-Z0-9\-_]{16,64}$'
+    patch:
+      tags: [Devices]
+      summary: Mettre à jour un appareil
+      description: |
+        Appelé à chaque lancement de l'application pour mettre à jour le pushToken
+        (régulièrement régénéré par FCM/APNs) et la version de l'app.
+      operationId: updateDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceUpdate'
+      responses:
+        '200':
+          description: Appareil mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Devices]
+      summary: Désactiver un appareil
+      description: Désactivation logique. Utilisé lors de la déconnexion ou changement de smartphone.
+      operationId: deactivateDevice
+      responses:
+        '200':
+          description: Appareil désactivé
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== NOTIFICATIONS ====================
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: Lister les notifications de l'utilisateur connecté
+      operationId: listNotifications
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: lu
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Liste des notifications
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Notification'
+                      nonLues:
+                        type: integer
+                        description: Nombre de notifications non lues (badge)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/{notificationId}/lire:
+    post:
+      tags: [Notifications]
+      summary: Marquer une notification comme lue
+      operationId: readNotification
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Notification marquée comme lue
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /notifications/lire-tout:
+    post:
+      tags: [Notifications]
+      summary: Marquer toutes les notifications comme lues
+      operationId: readAllNotifications
+      responses:
+        '200':
+          description: Toutes les notifications marquées comme lues
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  marqueesLues:
+                    type: integer
+                    description: Nombre de notifications mises à jour
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==================== UPLOAD ====================
+
+  /upload/image:
+    post:
+      tags: [Etablissements]
+      summary: Uploader une image d'établissement
+      description: "Upload vers AWS S3. Formats acceptés : JPEG, PNG, WebP. Taille max : 5 MB."
+      operationId: uploadImage
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Image uploadée avec succès
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    format: uri
+                    description: URL publique S3 de l'image
+        '400':
+          description: Format non supporté ou taille dépassée
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==================== HEALTH & MONITORING ====================
+
+  /health:
+    get:
+      tags: [Health & Monitoring]
+      summary: Santé du système
+      description: Vérifie la connectivité PostgreSQL, Redis et les APIs externes (ACRCloud, AudD). Utilisé par AWS ALB health checks.
+      operationId: healthCheck
+      security: []
+      responses:
+        '200':
+          description: Système opérationnel
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok, degraded]
+                  services:
+                    type: object
+                    properties:
+                      postgresql:
+                        type: string
+                        enum: [ok, error]
+                      redis:
+                        type: string
+                        enum: [ok, error, unavailable]
+                      acrcloud:
+                        type: string
+                        enum: [ok, error, unavailable]
+                      audd:
+                        type: string
+                        enum: [ok, error, unavailable]
+                  version:
+                    type: string
+                    example: "2.0.0"
+                  uptime:
+                    type: integer
+                    description: Uptime en secondes
+        '503':
+          description: Système dégradé (base de données inaccessible)
+
+  /health/ready:
+    get:
+      tags: [Health & Monitoring]
+      summary: Readiness probe
+      description: Kubernetes / AWS ALB readiness check. Retourne 200 uniquement si le service peut traiter des requêtes.
+      operationId: readinessCheck
+      security: []
+      responses:
+        '200':
+          description: Service prêt
+        '503':
+          description: Service non prêt (migrations en cours, connexion BDD absente)
+
+  /metrics:
+    get:
+      tags: [Health & Monitoring]
+      summary: Métriques applicatives (Prometheus)
+      description: |
+        Endpoint Prometheus pour Grafana.
+        Métriques exposées : requêtes HTTP (count, latence p50/p95/p99), 
+        diffusions/min, taux de reconnaissance, jobs Bull Queue en attente,
+        erreurs ACRCloud/AudD, utilisation mémoire Node.js.
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Métriques au format Prometheus text
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'

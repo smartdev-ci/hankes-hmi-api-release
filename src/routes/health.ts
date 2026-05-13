@@ -4,24 +4,52 @@ import { authenticate, authorize } from '../middleware/auth';
 const router = Router();
 
 /**
- * GET /health
+ * GET /v1/health
  * Santé de l'API
  */
-router.get('/health', async (req, res) => {
+router.get('/', async (req, res) => {
   res.json({
     success: true,
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    version: '2.0.0',
+    data: {
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      version: '2.0.0',
+    },
   });
 });
 
 /**
- * GET /health/ready
+ * GET /v1/health/database
+ * Vérification de la connexion à la base de données
+ */
+router.get('/database', async (req, res) => {
+  try {
+    // TODO: Vérifier la connexion à PostgreSQL avec Prisma
+    const connected = true; // Mock pour l'instant
+    
+    res.json({
+      success: true,
+      data: {
+        connected,
+        database: 'postgresql',
+        status: connected ? 'connected' : 'disconnected',
+      },
+    });
+  } catch (error: any) {
+    res.status(503).json({
+      success: false,
+      error: 'Database connection failed',
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * GET /v1/health/ready
  * Vérification de readiness (dépendances prêtes)
  */
-router.get('/health/ready', async (req, res) => {
+router.get('/ready', async (req, res) => {
   try {
     // TODO: Vérifier la connexion à PostgreSQL et Redis
     
@@ -43,7 +71,7 @@ router.get('/health/ready', async (req, res) => {
 });
 
 /**
- * GET /metrics
+ * GET /v1/metrics
  * Métriques Prometheus
  */
 router.get('/metrics', async (req, res) => {

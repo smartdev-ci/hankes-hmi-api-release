@@ -14,7 +14,7 @@ model User {
   email           String         @unique
   password        String
   nom             String
-  telephone       String
+  telephone       String         @unique
   role            UserRole       @default(etablissement)
   isVerified      Boolean        @default(false)
   isActive        Boolean        @default(true)

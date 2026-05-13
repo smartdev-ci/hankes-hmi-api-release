@@ -5,10 +5,17 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "nodemon --exec ts-node src/index.ts",
-     "build": "prisma generate && tsc",
+    "build": "prisma generate && tsc",
     "start": "node dist/index.js",
     "postinstall": "prisma generate",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:unit": "jest --testPathPattern=unit",
+    "test:integration": "jest --testPathPattern=integration",
+    "test:ci": "jest --ci --coverage --runInBand",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix"
   },
   "keywords": [
     "hmis",
@@ -21,7 +28,6 @@
   "license": "Confidentiel — HANKES Technologies",
   "dependencies": {
     "@prisma/client": "^5.22.0",
-    "prisma": "^5.22.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/compression": "^1.8.1",
     "@types/cors": "^2.8.19",
@@ -40,6 +46,7 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.1",
     "multer": "^1.4.5-lts.2",
+    "prisma": "^5.22.0",
     "tsconfig-paths": "^4.2.0",
     "uuid": "^11.1.0",
     "zod": "^3.24.4"
@@ -47,10 +54,18 @@
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/form-data": "^2.2.1",
+    "@types/jest": "^29.5.14",
     "@types/multer": "^1.4.13",
     "@types/node": "^22.19.19",
+    "@types/supertest": "^7.2.0",
     "@types/uuid": "^10.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.20.0",
+    "@typescript-eslint/parser": "^8.20.0",
+    "eslint": "^9.18.0",
+    "jest": "^29.7.0",
     "nodemon": "^3.1.10",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
   }

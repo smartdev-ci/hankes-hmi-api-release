@@ -19,7 +19,8 @@
     "declaration": true,
     "sourceMap": true,
 
-    "types": ["node"],
+    "types": ["node", "jest"],
+    "isolatedModules": true,
   },
 
   "include": ["src/**/*"],

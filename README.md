@@ -611,14 +611,4 @@ Voir [`DEPLOYMENT.md`](./DEPLOYMENT.md) pour guide détaillé.
 Ce logiciel est propriétaire et confidentiel. Toute reproduction, distribution ou utilisation non autorisée est interdite.
 
 ---
-
-## 🙏 Remerciements
-
-- **BURIDA** (Burkina Faso Droit d'Auteur) pour le partenariat
-- **ACRCloud** pour la reconnaissance musicale
-- **Supabase** pour l'infrastructure database
-- **Twilio** pour les communications SMS
-
----
-
 **Développé avec ❤️ par HANKES Technologies**

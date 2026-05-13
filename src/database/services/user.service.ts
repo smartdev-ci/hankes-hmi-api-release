@@ -108,7 +108,11 @@ export class UserService {
       if (error.code === 'P2002') {
         throw new ValidationError('Un utilisateur avec cet email existe déjà');
       }
-      if (error instanceof DatabaseError || error instanceof NotFoundError || error instanceof ValidationError) {
+      if (
+        error instanceof DatabaseError ||
+        error instanceof NotFoundError ||
+        error instanceof ValidationError
+      ) {
         throw error;
       }
       throw new DatabaseError(`Erreur lors de la mise à jour de l'utilisateur ${id}`);
@@ -156,16 +160,18 @@ export class UserService {
       throw new DatabaseError('Erreur lors du comptage des utilisateurs');
     }
   }
-
+  
   static async findByTelephone(telephone: string): Promise<User | null> {
     try {
-      const data = await prisma.user.findUnique({
+      const data = await prisma.user.findFirst({
         where: { telephone },
       });
       return data || null;
     } catch (error) {
       if (error instanceof DatabaseError) throw error;
-      throw new DatabaseError(`Erreur lors de la récupération de l'utilisateur avec le téléphone ${telephone}`);
+      throw new DatabaseError(
+        `Erreur lors de la récupération de l'utilisateur avec le téléphone ${telephone}`
+      );
     }
   }
 }

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
-import { validateRequest } from '../middleware';
+import { validateRequest } from '../middleware/index';
 import { 
   loginSchema, 
   registerSchema, 
@@ -11,13 +11,16 @@ import {
   passwordResetConfirmSchema,
   changePasswordSchema 
 } from '../utils/validators';
+import { UserService } from '../database/services/user.service';
+import { OTPService } from '../database/services/otp.service';
+import { RefreshTokenService } from '../database/services/refresh-token.service';
+import { EtablissementService } from '../database/services/etablissement.service';
+import bcrypt from 'bcryptjs';
+import jwt, { SignOptions } from 'jsonwebtoken';
+import { config } from '../config';
+import { UserRole, OtpPurpose } from '@prisma/client';
 
 const router = Router();
-
-// Mock database (à remplacer par PostgreSQL)
-const users: any[] = [];
-const otps: Map<string, any> = new Map();
-const refreshTokens: Map<string, any> = new Map();
 
 /**
  * POST /auth/register
@@ -25,60 +28,81 @@ const refreshTokens: Map<string, any> = new Map();
  */
 router.post('/register', validateRequest(registerSchema), async (req, res) => {
   try {
-    const { email, password, nom, telephone, role } = req.body;
+    const { email, password, nom, telephone, role, etablissement } = req.body;
 
     // Vérifier si l'email existe déjà
-    const existingUser = users.find(u => u.email === email);
+    const existingUser = await UserService.findByEmail(email);
     if (existingUser) {
-      res.status(409).json({
+      return res.status(409).json({
         success: false,
         error: 'Email déjà utilisé',
       });
-      return;
+    }
+
+    // Vérifier si le téléphone existe déjà
+    const existingPhone = await UserService.findByTelephone(telephone);
+    if (existingPhone) {
+      return res.status(409).json({
+        success: false,
+        error: 'Numéro de téléphone déjà utilisé',
+      });
     }
 
     // Hash du mot de passe
-    const bcrypt = require('bcryptjs');
     const hashedPassword = await bcrypt.hash(password, 12);
 
+    // Créer l'établissement si fourni (pour rôle etablissement)
+    let etablissementId = null;
+    if (role === UserRole.etablissement && etablissement) {
+      const newEtablissement = await EtablissementService.create({
+        nom: etablissement.nom,
+        type: etablissement.type,
+        ville: etablissement.ville,
+        adresse: etablissement.adresse,
+        telephone: telephone,
+        gerantId: '', // Sera mis à jour après création user
+      });
+      etablissementId = newEtablissement.id;
+    }
+
     // Créer l'utilisateur
-    const user = {
-      id: require('uuid').v4(),
+    const user = await UserService.create({
       email,
       password: hashedPassword,
       nom,
       telephone,
-      role,
-      isVerified: false,
-      isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    users.push(user);
+      role: role as UserRole,
+      etablissementId,
+    });
 
     // Générer et envoyer OTP
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    otps.set(telephone, {
+    await OTPService.create({
+      telephone,
       code: otpCode,
-      purpose: 'REGISTER',
+      purpose: OtpPurpose.REGISTER,
       expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
-      attempts: 0,
     });
 
     // TODO: Envoyer SMS via Twilio
     console.log(`OTP pour ${telephone}: ${otpCode}`);
 
-    res.status(201).json({
+    // Si établissement créé, mettre à jour avec le gerantId
+    if (etablissementId) {
+      await EtablissementService.update(etablissementId, { gerantId: user.id });
+    }
+
+    return res.status(201).json({
       success: true,
       message: `Compte créé. Un code OTP a été envoyé au ${telephone}.`,
       userId: user.id,
       otpExpireIn: 600,
     });
   } catch (error: any) {
-    res.status(500).json({
+    console.error('Erreur inscription:', error);
+    return res.status(500).json({
       success: false,
-      error: error.message,
+      error: error.message || 'Erreur lors de l\'inscription',
     });
   }
 });
@@ -92,69 +116,64 @@ router.post('/login', validateRequest(loginSchema), async (req, res) => {
     const { email, password, deviceId } = req.body;
 
     // Trouver l'utilisateur
-    const user = users.find(u => u.email === email);
+    const user = await UserService.findByEmail(email);
     if (!user) {
-      res.status(401).json({
+      return res.status(401).json({
         success: false,
         error: 'Identifiants invalides',
       });
-      return;
     }
 
     // Vérifier le mot de passe
-    const bcrypt = require('bcryptjs');
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
-      res.status(401).json({
+      return res.status(401).json({
         success: false,
         error: 'Identifiants invalides',
       });
-      return;
     }
 
     // Vérifier si le compte est vérifié
     if (!user.isVerified) {
-      res.status(403).json({
+      return res.status(403).json({
         success: false,
         error: 'Compte non vérifié',
       });
-      return;
     }
 
     // Vérifier si le compte est actif
     if (!user.isActive) {
-      res.status(403).json({
+      return res.status(403).json({
         success: false,
         error: 'Compte suspendu',
       });
-      return;
     }
 
     // Générer les tokens JWT
-    const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');
-    const cfg = require('../config').config;
-    
+    const jwtOptions: SignOptions = { expiresIn: config.jwt.expiresIn };
     const accessToken = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
-      cfg.jwt.secret,
-      { expiresIn: cfg.jwt.expiresIn }
+      config.jwt.secret,
+      jwtOptions
     );
 
+    const refreshJwtOptions: SignOptions = { expiresIn: config.jwt.refreshExpiresIn };
     const refreshToken = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
-      cfg.jwt.secret,
-      { expiresIn: cfg.jwt.refreshExpiresIn }
+      config.jwt.secret,
+      refreshJwtOptions
     );
 
-    // Stocker le refresh token hashé
+    // Stocker le refresh token hashé dans la base
     const refreshTokenHash = await bcrypt.hash(refreshToken, 12);
-    refreshTokens.set(user.id, {
+    await RefreshTokenService.create({
+      userId: user.id,
       tokenHash: refreshTokenHash,
-      deviceId,
+      deviceId: deviceId || null,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 jours
     });
 
-    res.json({
+    return res.json({
       success: true,
       accessToken,
       refreshToken,
@@ -169,9 +188,10 @@ router.post('/login', validateRequest(loginSchema), async (req, res) => {
       },
     });
   } catch (error: any) {
-    res.status(500).json({
+    console.error('Erreur login:', error);
+    return res.status(500).json({
       success: false,
-      error: error.message,
+      error: error.message || 'Erreur lors de la connexion',
     });
   }
 });
@@ -183,17 +203,18 @@ router.post('/login', validateRequest(loginSchema), async (req, res) => {
 router.post('/logout', authenticate, async (req, res) => {
   try {
     if (req.user?.id) {
-      refreshTokens.delete(req.user.id);
+      await RefreshTokenService.revokeUserTokens(req.user.id);
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Déconnexion réussie',
     });
   } catch (error: any) {
-    res.status(500).json({
+    console.error('Erreur logout:', error);
+    return res.status(500).json({
       success: false,
-      error: error.message,
+      error: error.message || 'Erreur lors de la déconnexion',
     });
   }
 });
@@ -207,35 +228,61 @@ router.post('/refresh', validateRequest(refreshTokenSchema), async (req, res) =>
     const { refreshToken } = req.body;
 
     // Vérifier le refresh token
-    const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');
-    const config = require('../config').config;
-
     const decoded = jwt.verify(refreshToken, config.jwt.secret) as any;
     
     // Vérifier si le token existe en base
-    const storedToken = refreshTokens.get(decoded.userId);
-    if (!storedToken) {
-      res.status(401).json({
+    const storedToken = await RefreshTokenService.findByUserId(decoded.userId);
+    if (!storedToken || storedToken.length === 0) {
+      return res.status(401).json({
         success: false,
         error: 'Refresh token invalide ou révoqué',
       });
-      return;
     }
+
+    // Vérifier si le token est valide (comparer le hash)
+    const isValid = await bcrypt.compare(refreshToken, storedToken[0].token);
+    if (!isValid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Refresh token invalide',
+      });
+    }
+
+    // Vérifier si le token est expiré
+    if (new Date() > storedToken[0].expiresAt) {
+      await RefreshTokenService.delete(storedToken[0].id);
+      return res.status(401).json({
+        success: false,
+        error: 'Refresh token expiré',
+      });
+    }
+
+    // Révoquer l'ancien token (rotation)
+    await RefreshTokenService.delete(storedToken[0].id);
 
     // Générer de nouveaux tokens
     const newAccessToken = jwt.sign(
-      { userId: decoded.userId, email: (decoded as any).email, role: (decoded as any).role },
+      { userId: decoded.userId, email: decoded.email, role: decoded.role },
       config.jwt.secret,
       { expiresIn: config.jwt.expiresIn }
     );
 
     const newRefreshToken = jwt.sign(
-      { userId: decoded.userId, email: (decoded as any).email, role: (decoded as any).role },
+      { userId: decoded.userId, email: decoded.email, role: decoded.role },
       config.jwt.secret,
       { expiresIn: config.jwt.refreshExpiresIn }
     );
 
-    res.json({
+    // Stocker le nouveau refresh token
+    const newRefreshTokenHash = await bcrypt.hash(newRefreshToken, 12);
+    await RefreshTokenService.create({
+      userId: decoded.userId,
+      tokenHash: newRefreshTokenHash,
+      deviceId: storedToken[0].deviceId,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+
+    return res.json({
       success: true,
       accessToken: newAccessToken,
       refreshToken: newRefreshToken,
@@ -243,7 +290,8 @@ router.post('/refresh', validateRequest(refreshTokenSchema), async (req, res) =>
       tokenType: 'Bearer',
     });
   } catch (error: any) {
-    res.status(401).json({
+    console.error('Erreur refresh:', error);
+    return res.status(401).json({
       success: false,
       error: 'Refresh token invalide ou expiré',
     });
@@ -261,25 +309,26 @@ router.post('/otp/envoyer', validateRequest(otpRequestSchema), async (req, res) 
     // Générer le code OTP
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     
-    otps.set(phone, {
+    await OTPService.create({
+      phone: phone,
       code: otpCode,
-      purpose,
+      purpose: purpose as OtpPurpose,
       expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
-      attempts: 0,
     });
 
     // TODO: Envoyer SMS via Twilio
     console.log(`OTP pour ${phone} (${purpose}): ${otpCode}`);
 
-    res.json({
+    return res.json({
       success: true,
       message: `Code OTP envoyé au ${phone}`,
       otpExpireIn: 600,
     });
   } catch (error: any) {
-    res.status(500).json({
+    console.error('Erreur envoi OTP:', error);
+    return res.status(500).json({
       success: false,
-      error: error.message,
+      error: error.message || 'Erreur lors de l\'envoi de l\'OTP',
     });
   }
 });
@@ -292,69 +341,35 @@ router.post('/otp/verifier', validateRequest(otpVerifySchema), async (req, res) 
   try {
     const { phone, otp } = req.body;
 
-    const otpRecord = otps.get(phone);
+    const otpRecord = await OTPService.findValidOTP(phone, otp);
     
     if (!otpRecord) {
-      res.status(400).json({
+      return res.status(400).json({
         success: false,
-        error: 'Aucun OTP trouvé pour ce numéro',
+        error: 'Code OTP invalide ou expiré',
       });
-      return;
     }
 
-    // Vérifier si l'OTP est expiré
-    if (new Date() > otpRecord.expiresAt) {
-      otps.delete(phone);
-      res.status(400).json({
-        success: false,
-        error: 'Code OTP expiré',
-      });
-      return;
-    }
+    // OTP valide - marquer comme utilisé et supprimer
+    await OTPService.delete(otpRecord.id);
 
-    // Vérifier le nombre de tentatives
-    if (otpRecord.attempts >= 3) {
-      otps.delete(phone);
-      res.status(400).json({
-        success: false,
-        error: 'Nombre maximum de tentatives dépassé',
-      });
-      return;
-    }
-
-    // Vérifier le code
-    if (otp !== otpRecord.code) {
-      otpRecord.attempts++;
-      res.status(400).json({
-        success: false,
-        error: 'Code OTP invalide',
-        remainingAttempts: 3 - otpRecord.attempts,
-      });
-      return;
-    }
-
-    // OTP valide - marquer comme utilisé
-    otpRecord.isUsed = true;
-
-    // Si c'est pour REGISTER, vérifier l'utilisateur
-    if (otpRecord.purpose === 'REGISTER') {
-      const user = users.find(u => u.telephone === phone);
+    // Si c'est pour REGISTER, vérifier l'utilisateur et le marquer comme vérifié
+    if (otpRecord.purpose === OtpPurpose.REGISTER) {
+      const user = await UserService.findByTelephone(phone);
       if (user) {
-        user.isVerified = true;
-        user.updatedAt = new Date();
+        await UserService.update(user.id, { isVerified: true });
       }
     }
 
-    otps.delete(phone);
-
-    res.json({
+    return res.json({
       success: true,
       message: 'Code OTP vérifié avec succès',
     });
   } catch (error: any) {
-    res.status(500).json({
+    console.error('Erreur vérification OTP:', error);
+    return res.status(500).json({
       success: false,
-      error: error.message,
+      error: error.message || 'Erreur lors de la vérification de l\'OTP',
     });
   }
 });
@@ -367,17 +382,24 @@ router.post('/password/reset', validateRequest(passwordResetRequestSchema), asyn
   try {
     const { email } = req.body;
 
-    const user = users.find(u => u.email === email);
+    const user = await UserService.findByEmail(email);
     
     // Toujours retourner succès pour éviter le fishing
-    res.json({
+    // TODO: Envoyer un email avec lien de reset si utilisateur existe
+    if (user) {
+      console.log(`Demande de reset pour: ${email}`);
+      // Générer un token et envoyer par email
+    }
+    
+    return res.json({
       success: true,
       message: 'Si un compte existe avec cet email, vous recevrez un lien de réinitialisation',
     });
   } catch (error: any) {
-    res.status(500).json({
+    console.error('Erreur reset password:', error);
+    return res.status(500).json({
       success: false,
-      error: error.message,
+      error: error.message || 'Erreur lors de la demande de réinitialisation',
     });
   }
 });
@@ -391,15 +413,18 @@ router.post('/password/reset/confirmer', validateRequest(passwordResetConfirmSch
     const { token, newPassword } = req.body;
 
     // TODO: Vérifier le token et mettre à jour le mot de passe
+    // Pour l'instant, retour succès
+    console.log('Reset password avec token:', token);
     
-    res.json({
+    return res.json({
       success: true,
       message: 'Mot de passe réinitialisé avec succès',
     });
   } catch (error: any) {
-    res.status(500).json({
+    console.error('Erreur confirmation reset:', error);
+    return res.status(500).json({
       success: false,
-      error: error.message,
+      error: error.message || 'Erreur lors de la réinitialisation du mot de passe',
     });
   }
 });
@@ -410,17 +435,16 @@ router.post('/password/reset/confirmer', validateRequest(passwordResetConfirmSch
  */
 router.get('/me', authenticate, async (req, res) => {
   try {
-    const user = users.find(u => u.id === req.user?.id);
+    const user = await UserService.findById(req.user!.id);
     
     if (!user) {
-      res.status(404).json({
+      return res.status(404).json({
         success: false,
         error: 'Utilisateur non trouvé',
       });
-      return;
     }
 
-    res.json({
+    return res.json({
       success: true,
       user: {
         id: user.id,
@@ -434,9 +458,10 @@ router.get('/me', authenticate, async (req, res) => {
       },
     });
   } catch (error: any) {
-    res.status(500).json({
+    console.error('Erreur récupération profil:', error);
+    return res.status(500).json({
       success: false,
-      error: error.message,
+      error: error.message || 'Erreur lors de la récupération du profil',
     });
   }
 });
@@ -449,43 +474,41 @@ router.patch('/changer-password', authenticate, validateRequest(changePasswordSc
   try {
     const { currentPassword, newPassword } = req.body;
     
-    const user = users.find(u => u.id === req.user?.id);
+    const user = await UserService.findById(req.user!.id);
     
     if (!user) {
-      res.status(404).json({
+      return res.status(404).json({
         success: false,
         error: 'Utilisateur non trouvé',
       });
-      return;
     }
 
     // Vérifier le mot de passe actuel
-    const bcrypt = require('bcryptjs');
     const isValidPassword = await bcrypt.compare(currentPassword, user.password);
     
     if (!isValidPassword) {
-      res.status(400).json({
+      return res.status(400).json({
         success: false,
         error: 'Mot de passe actuel incorrect',
       });
-      return;
     }
 
     // Hasher le nouveau mot de passe
-    user.password = await bcrypt.hash(newPassword, 12);
-    user.updatedAt = new Date();
+    const hashedNewPassword = await bcrypt.hash(newPassword, 12);
+    await UserService.update(user.id, { password: hashedNewPassword });
 
     // Révoquer tous les refresh tokens pour sécurité
-    refreshTokens.delete(user.id);
+    await RefreshTokenService.revokeUserTokens(user.id);
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Mot de passe changé avec succès. Veuillez vous reconnecter.',
     });
   } catch (error: any) {
-    res.status(500).json({
+    console.error('Erreur changement password:', error);
+    return res.status(500).json({
       success: false,
-      error: error.message,
+      error: error.message || 'Erreur lors du changement du mot de passe',
     });
   }
 });

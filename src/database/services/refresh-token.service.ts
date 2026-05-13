@@ -75,4 +75,33 @@ export class RefreshTokenService {
       throw new DatabaseError('Erreur lors de la suppression des refresh tokens expirés');
     }
   }
+
+  static async findByUserId(userId: string): Promise<RefreshToken[]> {
+    try {
+      const result = await prisma.refreshToken.findMany({
+        where: {
+          userId,
+          expiresAt: {
+            gt: new Date(),
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      return result;
+    } catch (error) {
+      if (error instanceof DatabaseError) throw error;
+      throw new DatabaseError('Erreur lors de la récupération des refresh tokens');
+    }
+  }
+
+  static async revokeUserTokens(userId: string): Promise<void> {
+    try {
+      await prisma.refreshToken.deleteMany({
+        where: { userId },
+      });
+    } catch (error) {
+      if (error instanceof DatabaseError) throw error;
+      throw new DatabaseError('Erreur lors de la révocation des refresh tokens');
+    }
+  }
 }

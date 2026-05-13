@@ -156,4 +156,16 @@ export class UserService {
       throw new DatabaseError('Erreur lors du comptage des utilisateurs');
     }
   }
+
+  static async findByTelephone(telephone: string): Promise<User | null> {
+    try {
+      const data = await prisma.user.findUnique({
+        where: { telephone },
+      });
+      return data || null;
+    } catch (error) {
+      if (error instanceof DatabaseError) throw error;
+      throw new DatabaseError(`Erreur lors de la récupération de l'utilisateur avec le téléphone ${telephone}`);
+    }
+  }
 }

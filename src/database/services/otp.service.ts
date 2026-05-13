@@ -97,4 +97,22 @@ export class OTPService {
       throw new DatabaseError('Erreur lors de la suppression des OTP expirés');
     }
   }
+
+  static async findValidOTP(phone: string, code: string): Promise<OTP | null> {
+    return OTPService.findByPhoneAndCode(phone, code);
+  }
+
+  static async delete(id: string): Promise<void> {
+    try {
+      await prisma.oTP.delete({
+        where: { id },
+      });
+    } catch (error: any) {
+      if (error.code === 'P2025') {
+        throw new ValidationError('OTP non trouvé');
+      }
+      if (error instanceof DatabaseError || error instanceof ValidationError) throw error;
+      throw new DatabaseError('Erreur lors de la suppression du OTP');
+    }
+  }
 }

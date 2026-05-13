@@ -1,0 +1,127 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.paginationSchema = exports.generateRapportSchema = exports.updateDeviceSchema = exports.createDeviceSchema = exports.registerDeviceSchema = exports.createDiffusionSchema = exports.audioSyncSchema = exports.audioCaptureSchema = exports.updateEtablissementSchema = exports.createEtablissementSchema = exports.createUserSchema = exports.updateUserSchema = exports.changePasswordSchema = exports.passwordResetConfirmSchema = exports.passwordResetRequestSchema = exports.otpVerifySchema = exports.otpRequestSchema = exports.refreshTokenSchema = exports.registerSchema = exports.loginSchema = void 0;
+const zod_1 = require("zod");
+// ==================== AUTHENTIFICATION ====================
+exports.loginSchema = zod_1.z.object({
+    email: zod_1.z.string().email('Email invalide'),
+    password: zod_1.z.string().min(8, 'Le mot de passe doit contenir au moins 8 caractères'),
+    deviceId: zod_1.z.string().regex(/^[a-zA-Z0-9\-_]{16,64}$/).optional(),
+});
+exports.registerSchema = zod_1.z.object({
+    email: zod_1.z.string().email('Email invalide'),
+    password: zod_1.z.string().min(8, 'Le mot de passe doit contenir au moins 8 caractères'),
+    nom: zod_1.z.string().max(255, 'Le nom est trop long'),
+    telephone: zod_1.z.string().regex(/^\+[1-9]\d{7,14}$/, 'Numéro de téléphone invalide (format E.164 requis)'),
+    role: zod_1.z.enum(['admin', 'etablissement', 'partenaire']).default('etablissement'),
+});
+exports.refreshTokenSchema = zod_1.z.object({
+    refreshToken: zod_1.z.string().min(1, 'Refresh token requis'),
+});
+exports.otpRequestSchema = zod_1.z.object({
+    phone: zod_1.z.string().regex(/^\+[1-9]\d{7,14}$/, 'Numéro de téléphone invalide (format E.164 requis)'),
+    purpose: zod_1.z.enum(['REGISTER', 'LOGIN', 'PASSWORD_RESET', 'TWO_FACTOR']),
+});
+exports.otpVerifySchema = zod_1.z.object({
+    phone: zod_1.z.string().regex(/^\+[1-9]\d{7,14}$/, 'Numéro de téléphone invalide'),
+    otp: zod_1.z.string().length(6, 'Le code OTP doit contenir 6 chiffres'),
+});
+exports.passwordResetRequestSchema = zod_1.z.object({
+    email: zod_1.z.string().email('Email invalide'),
+});
+exports.passwordResetConfirmSchema = zod_1.z.object({
+    token: zod_1.z.string().min(1, 'Token requis'),
+    newPassword: zod_1.z.string().min(8, 'Le nouveau mot de passe doit contenir au moins 8 caractères'),
+});
+exports.changePasswordSchema = zod_1.z.object({
+    currentPassword: zod_1.z.string().min(8, 'Le mot de passe actuel doit contenir au moins 8 caractères'),
+    newPassword: zod_1.z.string().min(8, 'Le nouveau mot de passe doit contenir au moins 8 caractères'),
+});
+// ==================== UTILISATEURS ====================
+exports.updateUserSchema = zod_1.z.object({
+    nom: zod_1.z.string().max(255).optional(),
+    telephone: zod_1.z.string().regex(/^\+[1-9]\d{7,14}$/).optional(),
+    etablissementId: zod_1.z.string().uuid().optional(),
+});
+exports.createUserSchema = zod_1.z.object({
+    email: zod_1.z.string().email(),
+    password: zod_1.z.string().min(8),
+    nom: zod_1.z.string().max(255),
+    telephone: zod_1.z.string().regex(/^\+[1-9]\d{7,14}$/),
+    role: zod_1.z.enum(['admin', 'etablissement', 'partenaire']),
+    isVerified: zod_1.z.boolean().default(false),
+    isActive: zod_1.z.boolean().default(true),
+});
+// ==================== ETABLISSEMENTS ====================
+exports.createEtablissementSchema = zod_1.z.object({
+    nom: zod_1.z.string().min(1, 'Nom requis').max(255),
+    type: zod_1.z.enum(['bar', 'maquis', 'cave', 'boite_de_nuit', 'restaurant', 'hotel']),
+    adresse: zod_1.z.string().min(1, 'Adresse requise'),
+    ville: zod_1.z.string().min(1, 'Ville requise'),
+    region: zod_1.z.string().min(1, 'Région requise'),
+    latitude: zod_1.z.number().optional(),
+    longitude: zod_1.z.number().optional(),
+    telephone: zod_1.z.string().regex(/^\+[1-9]\d{7,14}$/, 'Numéro de téléphone invalide'),
+    email: zod_1.z.string().email().optional(),
+    capacite: zod_1.z.number().int().positive().optional(),
+    licence: zod_1.z.string().optional(),
+});
+exports.updateEtablissementSchema = exports.createEtablissementSchema.partial();
+// ==================== AUDIO ====================
+exports.audioCaptureSchema = zod_1.z.object({
+    etablissementId: zod_1.z.string().uuid(),
+    duree: zod_1.z.number().positive(),
+    format: zod_1.z.string(),
+    taille: zod_1.z.number().positive(),
+    deviceId: zod_1.z.string(),
+    capturedAt: zod_1.z.string().datetime(),
+});
+exports.audioSyncSchema = zod_1.z.object({
+    captures: zod_1.z.array(exports.audioCaptureSchema),
+});
+// ==================== DIFFUSIONS ====================
+exports.createDiffusionSchema = zod_1.z.object({
+    etablissementId: zod_1.z.string().uuid(),
+    musicId: zod_1.z.string().uuid(),
+    titre: zod_1.z.string(),
+    artiste: zod_1.z.string(),
+    playedAt: zod_1.z.string().datetime(),
+    duree: zod_1.z.number().positive(),
+    source: zod_1.z.enum(['capture', 'manual', 'playlist']),
+});
+// ==================== DEVICES ====================
+exports.registerDeviceSchema = zod_1.z.object({
+    deviceId: zod_1.z.string().regex(/^[a-zA-Z0-9\-_]{16,64}$/),
+    platform: zod_1.z.enum(['ios', 'android']),
+    appVersion: zod_1.z.string(),
+    osVersion: zod_1.z.string(),
+    pushToken: zod_1.z.string().optional(),
+});
+exports.createDeviceSchema = zod_1.z.object({
+    nom: zod_1.z.string().min(1).max(255),
+    type: zod_1.z.enum(['mobile', 'tablette', 'desktop', 'autre']),
+    etablissementId: zod_1.z.string().uuid().optional(),
+    metadata: zod_1.z.record(zod_1.z.any()).optional(),
+});
+exports.updateDeviceSchema = zod_1.z.object({
+    nom: zod_1.z.string().min(1).max(255).optional(),
+    metadata: zod_1.z.record(zod_1.z.any()).optional(),
+    isActive: zod_1.z.boolean().optional(),
+});
+// ==================== RAPPORTS ====================
+exports.generateRapportSchema = zod_1.z.object({
+    type: zod_1.z.enum(['etablissement', 'periode', 'artiste']),
+    startDate: zod_1.z.string().datetime(),
+    endDate: zod_1.z.string().datetime(),
+    etablissementId: zod_1.z.string().uuid().optional(),
+    artiste: zod_1.z.string().optional(),
+    format: zod_1.z.enum(['pdf', 'excel']).default('pdf'),
+});
+// ==================== PAGINATION ====================
+exports.paginationSchema = zod_1.z.object({
+    page: zod_1.z.coerce.number().int().positive().default(1),
+    limit: zod_1.z.coerce.number().int().positive().max(100).default(20),
+    sortBy: zod_1.z.string().optional(),
+    sortOrder: zod_1.z.enum(['asc', 'desc']).default('desc'),
+});
+//# sourceMappingURL=validators.js.map

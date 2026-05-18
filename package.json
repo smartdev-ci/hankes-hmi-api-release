@@ -15,7 +15,8 @@
     "test:integration": "jest --testPathPattern=integration",
     "test:ci": "jest --ci --coverage --runInBand",
     "lint": "eslint src/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts --fix"
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "create-admin": "ts-node scripts/create-admin.ts"
   },
   "keywords": [
     "hmis",

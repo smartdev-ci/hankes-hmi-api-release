@@ -1,19 +1,49 @@
 ```
+# Build artifacts
+dist/
+*.js.map
+*.d.ts
+
 # Dependencies
 node_modules/
 
-# Build artifacts
-dist/
+# Logs and temp files
+*.log
+*.tmp
 
-# Environment variables
-.env*
+# Environment
+.env
+.env.local
+*.env.*
 
-# IDE files
+# Editors
 .vscode/
+.idea/
 
-# Prisma
-.prisma/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 
-# Package lock
-package-lock.json
+# Compiled
+*.o
+*.obj
+*.so
+*.a
+*.dll
+*.exe
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Testing
+.mypy_cache/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
 ```

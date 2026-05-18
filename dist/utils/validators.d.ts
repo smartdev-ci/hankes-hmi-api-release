@@ -332,16 +332,16 @@ export declare const createDiffusionSchema: z.ZodObject<{
     duree: z.ZodNumber;
     source: z.ZodEnum<["capture", "manual", "playlist"]>;
 }, "strip", z.ZodTypeAny, {
-    etablissementId: string;
     artiste: string;
+    etablissementId: string;
     duree: number;
     musicId: string;
     titre: string;
     playedAt: string;
     source: "capture" | "manual" | "playlist";
 }, {
-    etablissementId: string;
     artiste: string;
+    etablissementId: string;
     duree: number;
     musicId: string;
     titre: string;
@@ -408,14 +408,14 @@ export declare const generateRapportSchema: z.ZodObject<{
     format: "pdf" | "excel";
     startDate: string;
     endDate: string;
-    etablissementId?: string | undefined;
     artiste?: string | undefined;
+    etablissementId?: string | undefined;
 }, {
     type: "etablissement" | "artiste" | "periode";
     startDate: string;
     endDate: string;
-    etablissementId?: string | undefined;
     artiste?: string | undefined;
+    etablissementId?: string | undefined;
     format?: "pdf" | "excel" | undefined;
 }>;
 export declare const paginationSchema: z.ZodObject<{

@@ -5,6 +5,7 @@
 
 import { prisma } from '../index';
 import { DatabaseError, NotFoundError, ValidationError } from '../errors';
+import { UserRole } from '@prisma/client';
 
 interface User {
   id: string;
@@ -12,7 +13,7 @@ interface User {
   password: string;
   nom: string;
   telephone: string;
-  role: 'admin' | 'etablissement' | 'partenaire';
+  role: UserRole;
   isVerified: boolean;
   isActive: boolean;
   etablissementId: string | null;
@@ -25,7 +26,7 @@ interface UserInsert {
   password: string;
   nom: string;
   telephone: string;
-  role?: 'admin' | 'etablissement' | 'partenaire';
+  role?: UserRole;
   isVerified?: boolean;
   isActive?: boolean;
   etablissementId?: string | null;
@@ -36,7 +37,7 @@ interface UserUpdate {
   password?: string;
   nom?: string;
   telephone?: string;
-  role?: 'admin' | 'etablissement' | 'partenaire';
+  role?: UserRole;
   isVerified?: boolean;
   isActive?: boolean;
   etablissementId?: string | null;
@@ -138,7 +139,7 @@ export class UserService {
     return this.update(id, { isActive });
   }
 
-  static async findByRole(role: User['role']): Promise<User[]> {
+  static async findByRole(role: UserRole): Promise<User[]> {
     try {
       const data = await prisma.user.findMany({
         where: { role },
@@ -160,7 +161,7 @@ export class UserService {
       throw new DatabaseError('Erreur lors du comptage des utilisateurs');
     }
   }
-  
+
   static async findByTelephone(telephone: string): Promise<User | null> {
     try {
       const data = await prisma.user.findFirst({

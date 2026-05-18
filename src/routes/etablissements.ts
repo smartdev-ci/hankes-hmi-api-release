@@ -3,7 +3,7 @@ import { authenticate, authorize, hashPassword } from '../middleware/auth';
 import { validateRequest } from '../middleware';
 import { createEtablissementSchema, updateEtablissementSchema } from '../utils/validators';
 import { EtablissementService, UserService } from '../database/services';
-import { UserRole, CreatorRole } from '@prisma/client';
+import { UserRole } from '../types';
 
 const router = Router();
 
@@ -114,7 +114,7 @@ router.post('/', authenticate, validateRequest(createEtablissementSchema), async
         password: hashedPassword,
         nom: gerantNom,
         telephone: gerantTelephone,
-        role: UserRole.etablissement,
+        role: 'etablissement',
         isVerified: false,
         isActive: true,
       });
@@ -145,7 +145,7 @@ router.post('/', authenticate, validateRequest(createEtablissementSchema), async
       capacite: capacite || null,
       licence: licence || null,
       creePar: createurId,
-      roleCreateur: createurRole as CreatorRole,
+      roleCreateur: createurRole as 'admin' | 'recenseur',
     });
 
     res.status(201).json({

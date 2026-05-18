@@ -5,7 +5,6 @@ const auth_1 = require("../middleware/auth");
 const middleware_1 = require("../middleware");
 const validators_1 = require("../utils/validators");
 const services_1 = require("../database/services");
-const client_1 = require("@prisma/client");
 const router = (0, express_1.Router)();
 /**
  * GET /etablissements
@@ -97,7 +96,7 @@ router.post('/', auth_1.authenticate, (0, middleware_1.validateRequest)(validato
                 password: hashedPassword,
                 nom: gerantNom,
                 telephone: gerantTelephone,
-                role: client_1.UserRole.etablissement,
+                role: 'etablissement',
                 isVerified: false,
                 isActive: true,
             });

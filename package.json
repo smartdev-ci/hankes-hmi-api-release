@@ -16,7 +16,9 @@
     "test:ci": "jest --ci --coverage --runInBand",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
-    "create-admin": "ts-node scripts/create-admin.ts"
+    "create-admin": "ts-node scripts/create-admin.ts",
+    "create-admin-api": "tsx scripts/create-admin-api.ts",
+    "verify-otp": "tsx scripts/verify-otp.ts"
   },
   "keywords": [
     "hmis",
@@ -68,6 +70,7 @@
     "supertest": "^7.2.2",
     "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
+    "tsx": "^4.22.2",
     "typescript": "^5.8.3"
   }
 }

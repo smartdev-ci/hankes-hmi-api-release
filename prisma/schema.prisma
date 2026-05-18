@@ -8,57 +8,143 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-/// Utilisateurs du système (admins, gérants d'établissements, partenaires)
+// ============================================================
+// MODÈLES UTILISATEURS
+// ============================================================
+
+/// Utilisateurs du système (admins, gérants, recenseurs, artistes, partenaires)
 model User {
-  id              String         @id @default(uuid())
-  email           String         @unique
+  id              String    @id @default(uuid())
+  email           String    @unique
   password        String
   nom             String
-  telephone       String         @unique
-  role            UserRole       @default(etablissement)
-  isVerified      Boolean        @default(false)
-  isActive        Boolean        @default(true)
-  etablissementId String?        @unique
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  audioCaptures   AudioCapture[]
-  devices         Device[]
-  diffusions      Diffusion[]
-  etablissement   Etablissement?
-  notifications   Notification[]
-  rapports        Rapport[]
-  refreshTokens   RefreshToken[]
+  telephone       String    @unique
+  role            UserRole  @default(etablissement)
+  isVerified      Boolean   @default(false)
+  isActive        Boolean   @default(true)
+  etablissementId String?   // Gardé pour compatibilité — UNIQUE supprimé
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations existantes
+  audioCaptures  AudioCapture[]
+  devices        Device[]
+  diffusions     Diffusion[]
+  notifications  Notification[]
+  rapports       Rapport[]
+  refreshTokens  RefreshToken[]
+
+  // Gérant d'établissement (relation existante renommée pour clarté)
+  etablissement  Etablissement? @relation("GerantEtablissement")
+
+  // NOUVELLES relations
+  recenseurProfile      RecenseurProfile?   @relation("UserRecenseurProfile")
+  artisteProfile        ArtisteProfile?     @relation("UserArtisteProfile")
+  etablissementsCrees   Etablissement[]     @relation("CreateurEtablissement")
+  recenseursCrees       RecenseurProfile[]  @relation("AdminCreateurRecenseur")
+  etablissementUsers    EtablissementUser[] @relation("UserEtablissements")
+  assignementsEffectues EtablissementUser[] @relation("AssignePar")
+  musiquesRevendiquees  ArtisteMusique[]
 
   @@map("users")
 }
 
+/// Profil étendu d'un agent recenseur (créé par un admin)
+model RecenseurProfile {
+  id               String            @id @default(uuid())
+  userId           String            @unique
+  numeroPiece      String
+  typePiece        PieceIdentiteType
+  dateNaissance    DateTime          @db.Date
+  photoIdentiteUrl String
+  creePar          String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  user  User @relation("UserRecenseurProfile",   fields: [userId],  references: [id], onDelete: Cascade)
+  admin User @relation("AdminCreateurRecenseur", fields: [creePar], references: [id], onDelete: Restrict)
+
+  @@map("recenseur_profiles")
+}
+
+/// Profil étendu d'un artiste (inscription publique)
+model ArtisteProfile {
+  id         String   @id @default(uuid())
+  userId     String   @unique
+  nomArtiste String
+  bio        String?
+  isrc       String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation("UserArtisteProfile", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("artiste_profiles")
+}
+
+// ============================================================
+// MODÈLES ÉTABLISSEMENTS
+// ============================================================
+
 /// Établissements (bars, maquis, boîtes de nuit, etc.)
 model Etablissement {
-  id            String            @id @default(uuid())
-  nom           String
-  type          EtablissementType
-  adresse       String
-  ville         String
-  region        String
-  latitude      Float?
-  longitude     Float?
-  telephone     String
-  email         String?
-  gerantId      String            @unique
-  isActive      Boolean           @default(true)
-  isVerified    Boolean           @default(false)
-  capacite      Int?
-  licence       String?
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
+  id           String            @id @default(uuid())
+  nom          String
+  type         EtablissementType
+  adresse      String
+  ville        String
+  region       String
+  latitude     Float?
+  longitude    Float?
+  telephone    String
+  email        String?
+  gerantId     String            @unique
+  isActive     Boolean           @default(true)
+  isVerified   Boolean           @default(false)
+  capacite     Int?
+  licence      String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  // NOUVELLES colonnes — traçabilité de la création
+  creePar      String?       // ID de l'admin ou recenseur ayant créé l'établissement
+  roleCreateur CreatorRole?  // Précise si créé par admin ou recenseur
+
+  // Relations existantes
   audioCaptures AudioCapture[]
   devices       Device[]
   diffusions    Diffusion[]
-  gerant        User              @relation(fields: [gerantId], references: [id], onDelete: Cascade)
   rapports      Rapport[]
+  gerant        User          @relation("GerantEtablissement",   fields: [gerantId], references: [id], onDelete: Cascade)
 
+  // NOUVELLES relations
+  createur User?               @relation("CreateurEtablissement", fields: [creePar], references: [id], onDelete: SetNull)
+  membres  EtablissementUser[]
+
+  @@index([creePar])
   @@map("etablissements")
 }
+
+/// Membres liés à un établissement (hors gérant)
+model EtablissementUser {
+  id              String   @id @default(uuid())
+  etablissementId String
+  userId          String
+  role            String   @default("staff")
+  assigneAt       DateTime @default(now())
+  assignePar      String
+
+  etablissement Etablissement @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
+  user          User          @relation("UserEtablissements", fields: [userId],     references: [id], onDelete: Cascade)
+  assigne       User          @relation("AssignePar",         fields: [assignePar], references: [id], onDelete: Restrict)
+
+  @@unique([etablissementId, userId])
+  @@map("etablissement_users")
+}
+
+// ============================================================
+// MODÈLES AUDIO & RECONNAISSANCE
+// ============================================================
 
 /// Captures audio envoyées par les appareils pour identification
 model AudioCapture {
@@ -75,38 +161,66 @@ model AudioCapture {
   syncedAt        DateTime?
   processedAt     DateTime?
   createdAt       DateTime           @default(now())
-  device          Device             @relation(fields: [deviceId], references: [id], onDelete: SetNull)
-  etablissement   Etablissement      @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
-  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  recognition     MusicRecognition?
+
+  device        Device           @relation(fields: [deviceId],        references: [id], onDelete: SetNull)
+  etablissement Etablissement    @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
+  user          User             @relation(fields: [userId],          references: [id], onDelete: Cascade)
+  recognition   MusicRecognition?
+  diffusions    Diffusion[]
 
   @@map("audio_captures")
 }
 
-/// Résultats de la reconnaissance musicale (ACRCloud, AUDD, etc.)
+/// Résultats de la reconnaissance musicale (ACRCloud, AudD)
 model MusicRecognition {
-  id         String       @id @default(uuid())
-  captureId  String       @unique
-  titre      String
-  artiste    String
-  album      String?
-  isrc       String?      @unique
-  label      String?
-  genre      String?
-  annee      Int?
+  id        String   @id @default(uuid())
+  captureId String   @unique
+  titre     String
+  artiste   String
+  album     String?
+  isrc      String?  // UNIQUE supprimé — même ISRC peut apparaître sur plusieurs captures
+  label     String?
+  genre     String?
+  annee     Int?
   confidence Float
-  source     String
-  metadata   Json?
-  createdAt  DateTime     @default(now())
-  diffusions Diffusion[]
-  capture    AudioCapture @relation(fields: [captureId], references: [id], onDelete: Cascade)
+  source    String
+  metadata  Json?
+  createdAt DateTime @default(now())
 
+  capture         AudioCapture     @relation(fields: [captureId], references: [id], onDelete: Cascade)
+  diffusions      Diffusion[]
+  artisteMusiques ArtisteMusique[] // NOUVEAU — revendications artistes
+
+  @@index([isrc]) // Index simple (non unique) pour le matching
   @@map("music_recognitions")
 }
 
+/// Revendication d'une musique par un artiste (matching via nom + ISRC)
+model ArtisteMusique {
+  id                 String   @id @default(uuid())
+  artisteUserId      String
+  musicRecognitionId String?
+  isrc               String?  // Pour matcher même sans musicRecognitionId
+  nomArtiste         String   // Pour matcher via le nom en texte libre
+  verifie            Boolean  @default(false)
+  revendiqueAt       DateTime @default(now())
+
+  artiste          User              @relation(fields: [artisteUserId],      references: [id], onDelete: Cascade)
+  musicRecognition MusicRecognition? @relation(fields: [musicRecognitionId], references: [id], onDelete: SetNull)
+
+  @@unique([artisteUserId, musicRecognitionId])
+  @@index([isrc])
+  @@index([nomArtiste])
+  @@map("artiste_musiques")
+}
+
+// ============================================================
+// MODÈLES DIFFUSION
+// ============================================================
+
 /// Diffusions de musique dans les établissements
 model Diffusion {
-  id              String           @id @default(uuid())
+  id              String          @id @default(uuid())
   etablissementId String
   musicId         String
   titre           String
@@ -114,14 +228,24 @@ model Diffusion {
   playedAt        DateTime
   duree           Int
   source          DiffusionSource
-  createdAt       DateTime         @default(now())
+  createdAt       DateTime        @default(now())
   userId          String?
-  etablissement   Etablissement    @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
-  music           MusicRecognition @relation(fields: [musicId], references: [id], onDelete: Cascade)
-  user            User?            @relation(fields: [userId], references: [id])
+  captureId       String?         // NOUVEAU — lien vers la capture source
 
+  etablissement Etablissement    @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
+  music         MusicRecognition @relation(fields: [musicId],         references: [id], onDelete: Cascade)
+  user          User?            @relation(fields: [userId],          references: [id])
+  capture       AudioCapture?    @relation(fields: [captureId],       references: [id], onDelete: SetNull)
+
+  // Index de performance pour le récap artiste
+  @@index([musicId, playedAt(sort: Desc)])
+  @@index([etablissementId, playedAt(sort: Desc)])
   @@map("diffusions")
 }
+
+// ============================================================
+// MODÈLES DEVICES, AUTH & NOTIFICATIONS
+// ============================================================
 
 /// Appareils mobiles enregistrés
 model Device {
@@ -136,9 +260,10 @@ model Device {
   lastActiveAt    DateTime       @default(now())
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
-  audioCaptures   AudioCapture[]
-  etablissement   Etablissement? @relation(fields: [etablissementId], references: [id])
-  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  audioCaptures AudioCapture[]
+  etablissement Etablissement? @relation(fields: [etablissementId], references: [id])
+  user          User           @relation(fields: [userId],          references: [id], onDelete: Cascade)
 
   @@map("devices")
 }
@@ -165,7 +290,8 @@ model RefreshToken {
   deviceId  String?
   expiresAt DateTime
   createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("refresh_tokens")
 }
@@ -181,35 +307,59 @@ model Notification {
   dateLecture DateTime?
   metadata    Json?
   createdAt   DateTime         @default(now())
-  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("notifications")
 }
 
+// ============================================================
+// MODÈLES RAPPORTS
+// ============================================================
+
 /// Rapports générés (PDF, Excel, etc.)
 model Rapport {
-  id              String         @id @default(uuid())
+  id              String        @id @default(uuid())
   type            RapportType
   dateDebut       DateTime
   dateFin         DateTime
-  format          RapportFormat  @default(pdf)
-  statut          RapportStatut  @default(en_cours)
+  format          RapportFormat @default(pdf)
+  statut          RapportStatut @default(en_cours)
   fichierUrl      String?
-  dateGeneration  DateTime       @default(now())
+  dateGeneration  DateTime      @default(now())
   generePar       String
   metadata        Json?
-  createdAt       DateTime       @default(now())
+  createdAt       DateTime      @default(now())
   etablissementId String?
-  etablissement   Etablissement? @relation(fields: [etablissementId], references: [id])
-  user            User           @relation(fields: [generePar], references: [id], onDelete: Cascade)
+
+  etablissement Etablissement? @relation(fields: [etablissementId], references: [id])
+  user          User           @relation(fields: [generePar],       references: [id], onDelete: Cascade)
 
   @@map("rapports")
 }
+
+// ============================================================
+// ENUMS
+// ============================================================
 
 enum UserRole {
   admin
   etablissement
   partenaire
+  recenseur  // NOUVEAU — agent recenseur créé par un admin
+  artiste    // NOUVEAU — artiste inscrit publiquement
+}
+
+enum PieceIdentiteType {  // NOUVEAU
+  cni
+  passeport
+  titre_sejour
+  carte_consulaire
+}
+
+enum CreatorRole {  // NOUVEAU — qui a créé l'établissement
+  admin
+  recenseur
 }
 
 enum EtablissementType {

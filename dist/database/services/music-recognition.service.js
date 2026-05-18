@@ -130,10 +130,16 @@ class MusicRecognitionService {
             throw new errors_1.DatabaseError(`Erreur lors de la recherche des reconnaissances pour le titre ${titre}`);
         }
     }
+    /**
+     * Retourne la première reconnaissance correspondant à l'ISRC donné.
+     * On utilise findFirst (et non findUnique) car isrc n'est plus une contrainte unique
+     * dans le schéma — un même ISRC peut apparaître sur plusieurs captures.
+     */
     static async findByIsrc(isrc) {
         try {
-            const data = await index_1.prisma.musicRecognition.findUnique({
+            const data = await index_1.prisma.musicRecognition.findFirst({
                 where: { isrc },
+                orderBy: { createdAt: 'desc' },
             });
             return data || null;
         }
@@ -141,6 +147,23 @@ class MusicRecognitionService {
             if (error instanceof errors_1.DatabaseError)
                 throw error;
             throw new errors_1.DatabaseError(`Erreur lors de la recherche de la reconnaissance avec ISRC ${isrc}`);
+        }
+    }
+    /**
+     * Retourne toutes les reconnaissances correspondant à l'ISRC donné.
+     */
+    static async findAllByIsrc(isrc) {
+        try {
+            const data = await index_1.prisma.musicRecognition.findMany({
+                where: { isrc },
+                orderBy: { createdAt: 'desc' },
+            });
+            return data;
+        }
+        catch (error) {
+            if (error instanceof errors_1.DatabaseError)
+                throw error;
+            throw new errors_1.DatabaseError(`Erreur lors de la recherche des reconnaissances avec ISRC ${isrc}`);
         }
     }
     static async count() {

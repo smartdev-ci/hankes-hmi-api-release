@@ -57,9 +57,29 @@ export const createUserSchema = z.object({
   password: z.string().min(8),
   nom: z.string().max(255),
   telephone: z.string().regex(/^\+[1-9]\d{7,14}$/),
-  role: z.enum(['admin', 'etablissement', 'partenaire']),
+  role: z.enum(['admin', 'etablissement', 'partenaire', 'recenseur', 'artiste']),
   isVerified: z.boolean().default(false),
   isActive: z.boolean().default(true),
+});
+
+// Schéma pour créer un utilisateur recenseur (par un admin)
+export const createRecenseurUserSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  nom: z.string().max(255),
+  prenom: z.string().max(255),
+  telephone: z.string().regex(/^\+[1-9]\d{7,14}$/),
+  numeroPiece: z.string().min(3).max(50),
+  typePiece: z.enum(['cni', 'passeport', 'titre_sejour', 'carte_consulaire']),
+  dateNaissance: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  photoIdentiteUrl: z.string().url(),
+});
+
+// Schéma pour créer un profil artiste
+export const createArtisteProfileSchema = z.object({
+  nomArtiste: z.string().min(1).max(255),
+  bio: z.string().max(1000).optional(),
+  isrc: z.string().max(50).optional(),
 });
 
 // ==================== ETABLISSEMENTS ====================
@@ -76,6 +96,9 @@ export const createEtablissementSchema = z.object({
   email: z.string().email().optional(),
   capacite: z.number().int().positive().optional(),
   licence: z.string().optional(),
+  gerantEmail: z.string().email().optional(), // Email du gérant à créer/lié
+  gerantNom: z.string().optional(), // Nom du gérant si création
+  gerantTelephone: z.string().regex(/^\+[1-9]\d{7,14}$/).optional(), // Téléphone du gérant
 });
 
 export const updateEtablissementSchema = createEtablissementSchema.partial();

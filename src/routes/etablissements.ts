@@ -1,12 +1,11 @@
 import { Router } from 'express';
-import { authenticate, authorize } from '../middleware/auth';
+import { authenticate, authorize, hashPassword } from '../middleware/auth';
 import { validateRequest } from '../middleware';
 import { createEtablissementSchema, updateEtablissementSchema } from '../utils/validators';
+import { EtablissementService, UserService } from '../database/services';
+import { UserRole, CreatorRole } from '@prisma/client';
 
 const router = Router();
-
-// Mock database
-const etablissements: any[] = [];
 
 /**
  * GET /etablissements
@@ -20,17 +19,17 @@ router.get('/', authenticate, async (req, res) => {
     const type = req.query.type as string;
     const search = req.query.search as string;
 
-    let filtered = [...etablissements];
+    let etablissements = await EtablissementService.findAll();
 
     // Filtres
     if (ville) {
-      filtered = filtered.filter(e => e.ville === ville);
+      etablissements = etablissements.filter(e => e.ville === ville);
     }
     if (type) {
-      filtered = filtered.filter(e => e.type === type);
+      etablissements = etablissements.filter(e => e.type === type);
     }
     if (search) {
-      filtered = filtered.filter(e => 
+      etablissements = etablissements.filter(e => 
         e.nom.toLowerCase().includes(search.toLowerCase()) ||
         e.adresse.toLowerCase().includes(search.toLowerCase())
       );
@@ -39,7 +38,7 @@ router.get('/', authenticate, async (req, res) => {
     // Pagination
     const startIndex = (page - 1) * limit;
     const endIndex = startIndex + limit;
-    const paginatedResults = filtered.slice(startIndex, endIndex);
+    const paginatedResults = etablissements.slice(startIndex, endIndex);
 
     res.json({
       success: true,
@@ -47,8 +46,8 @@ router.get('/', authenticate, async (req, res) => {
       pagination: {
         page,
         limit,
-        total: filtered.length,
-        totalPages: Math.ceil(filtered.length / limit),
+        total: etablissements.length,
+        totalPages: Math.ceil(etablissements.length / limit),
       },
     });
   } catch (error: any) {
@@ -61,29 +60,98 @@ router.get('/', authenticate, async (req, res) => {
 
 /**
  * POST /etablissements
- * Créer un nouvel établissement
+ * Créer un nouvel établissement (recenseur ou admin)
+ * Si gerantEmail est fourni, crée un utilisateur gérant lié
  */
 router.post('/', authenticate, validateRequest(createEtablissementSchema), async (req, res) => {
   try {
-    const etablissement = {
-      id: require('uuid').v4(),
-      ...req.body,
-      gerantId: req.user?.id,
-      isActive: true,
-      isVerified: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    const {
+      nom, type, adresse, ville, region, latitude, longitude,
+      telephone, email, capacite, licence,
+      gerantEmail, gerantNom, gerantTelephone
+    } = req.body;
 
-    etablissements.push(etablissement);
+    const createurId = req.user!.id;
+    const createurRole = req.user!.role as UserRole;
 
-    // Mettre à jour l'utilisateur avec l'ID de l'établissement
-    // (dans une vraie implémentation, mettre à jour la BDD)
+    // Vérifier que le créateur est admin ou recenseur
+    if (createurRole !== 'admin' && createurRole !== 'recenseur') {
+      return res.status(403).json({
+        success: false,
+        error: 'Seuls les admins et recenseurs peuvent créer des établissements',
+      });
+    }
+
+    let gerantId: string;
+
+    // Si les informations du gérant sont fournies, créer l'utilisateur gérant
+    if (gerantEmail && gerantNom && gerantTelephone) {
+      // Vérifier si l'email existe déjà
+      const existingUser = await UserService.findByEmail(gerantEmail);
+      if (existingUser) {
+        return res.status(409).json({
+          success: false,
+          error: 'Email du gérant déjà utilisé',
+        });
+      }
+
+      // Vérifier si le téléphone existe déjà
+      const existingPhone = await UserService.findByTelephone(gerantTelephone);
+      if (existingPhone) {
+        return res.status(409).json({
+          success: false,
+          error: 'Numéro de téléphone du gérant déjà utilisé',
+        });
+      }
+
+      // Générer un mot de passe temporaire
+      const tempPassword = Math.random().toString(36).slice(-8);
+      const hashedPassword = await hashPassword(tempPassword);
+
+      // Créer l'utilisateur gérant
+      const gerant = await UserService.create({
+        email: gerantEmail,
+        password: hashedPassword,
+        nom: gerantNom,
+        telephone: gerantTelephone,
+        role: UserRole.etablissement,
+        isVerified: false,
+        isActive: true,
+      });
+
+      gerantId = gerant.id;
+
+      // TODO: Envoyer email/SMS au gérant avec ses identifiants
+      console.log(`Gérant créé: ${gerantEmail}, mot de passe temporaire: ${tempPassword}`);
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'Les informations du gérant (email, nom, téléphone) sont requises',
+      });
+    }
+
+    // Créer l'établissement
+    const etablissement = await EtablissementService.create({
+      nom,
+      type,
+      adresse,
+      ville,
+      region,
+      latitude: latitude || null,
+      longitude: longitude || null,
+      telephone,
+      email: email || null,
+      gerantId,
+      capacite: capacite || null,
+      licence: licence || null,
+      creePar: createurId,
+      roleCreateur: createurRole as CreatorRole,
+    });
 
     res.status(201).json({
       success: true,
-      data: etablissement,
       message: 'Établissement créé avec succès',
+      data: etablissement,
     });
   } catch (error: any) {
     res.status(500).json({
@@ -99,25 +167,23 @@ router.post('/', authenticate, validateRequest(createEtablissementSchema), async
  */
 router.get('/:etablissementId', authenticate, async (req, res) => {
   try {
-    const { etablissementId } = req.params;
+    const etablissementId = Array.isArray(req.params.etablissementId) ? req.params.etablissementId[0] : req.params.etablissementId;
     
-    const etablissement = etablissements.find(e => e.id === etablissementId);
+    const etablissement = await EtablissementService.findById(etablissementId);
     
     if (!etablissement) {
-      res.status(404).json({
+      return res.status(404).json({
         success: false,
         error: 'Établissement non trouvé',
       });
-      return;
     }
 
     // Vérifier les permissions
     if (req.user?.role !== 'admin' && etablissement.gerantId !== req.user?.id) {
-      res.status(403).json({
+      return res.status(403).json({
         success: false,
         error: 'Accès non autorisé',
       });
-      return;
     }
 
     res.json({
@@ -138,36 +204,31 @@ router.get('/:etablissementId', authenticate, async (req, res) => {
  */
 router.put('/:etablissementId', authenticate, validateRequest(updateEtablissementSchema), async (req, res) => {
   try {
-    const { etablissementId } = req.params;
+    const etablissementId = Array.isArray(req.params.etablissementId) ? req.params.etablissementId[0] : req.params.etablissementId;
     
-    const etablissement = etablissements.find(e => e.id === etablissementId);
+    const etablissement = await EtablissementService.findById(etablissementId);
     
     if (!etablissement) {
-      res.status(404).json({
+      return res.status(404).json({
         success: false,
         error: 'Établissement non trouvé',
       });
-      return;
     }
 
     // Vérifier les permissions
     if (req.user?.role !== 'admin' && etablissement.gerantId !== req.user?.id) {
-      res.status(403).json({
+      return res.status(403).json({
         success: false,
         error: 'Accès non autorisé',
       });
-      return;
     }
 
     // Mise à jour
-    Object.assign(etablissement, {
-      ...req.body,
-      updatedAt: new Date(),
-    });
+    const updatedEtablissement = await EtablissementService.update(etablissementId, req.body);
 
     res.json({
       success: true,
-      data: etablissement,
+      data: updatedEtablissement,
       message: 'Établissement mis à jour avec succès',
     });
   } catch (error: any) {
@@ -184,19 +245,9 @@ router.put('/:etablissementId', authenticate, validateRequest(updateEtablissemen
  */
 router.delete('/:etablissementId', authenticate, authorize('admin'), async (req, res) => {
   try {
-    const { etablissementId } = req.params;
+    const etablissementId = Array.isArray(req.params.etablissementId) ? req.params.etablissementId[0] : req.params.etablissementId;
     
-    const index = etablissements.findIndex(e => e.id === etablissementId);
-    
-    if (index === -1) {
-      res.status(404).json({
-        success: false,
-        error: 'Établissement non trouvé',
-      });
-      return;
-    }
-
-    etablissements.splice(index, 1);
+    await EtablissementService.delete(etablissementId);
 
     res.json({
       success: true,
@@ -216,20 +267,9 @@ router.delete('/:etablissementId', authenticate, authorize('admin'), async (req,
  */
 router.post('/:etablissementId/valider', authenticate, authorize('admin'), async (req, res) => {
   try {
-    const { etablissementId } = req.params;
+    const etablissementId = Array.isArray(req.params.etablissementId) ? req.params.etablissementId[0] : req.params.etablissementId;
     
-    const etablissement = etablissements.find(e => e.id === etablissementId);
-    
-    if (!etablissement) {
-      res.status(404).json({
-        success: false,
-        error: 'Établissement non trouvé',
-      });
-      return;
-    }
-
-    etablissement.isVerified = true;
-    etablissement.updatedAt = new Date();
+    const etablissement = await EtablissementService.verifyEtablissement(etablissementId);
 
     res.json({
       success: true,
@@ -250,23 +290,9 @@ router.post('/:etablissementId/valider', authenticate, authorize('admin'), async
  */
 router.post('/:etablissementId/suspendre', authenticate, authorize('admin'), async (req, res) => {
   try {
-    const { etablissementId } = req.params;
-    const { motif } = req.body;
+    const etablissementId = Array.isArray(req.params.etablissementId) ? req.params.etablissementId[0] : req.params.etablissementId;
     
-    const etablissement = etablissements.find(e => e.id === etablissementId);
-    
-    if (!etablissement) {
-      res.status(404).json({
-        success: false,
-        error: 'Établissement non trouvé',
-      });
-      return;
-    }
-
-    etablissement.isActive = false;
-    etablissement.updatedAt = new Date();
-
-    // TODO: Envoyer notification au gérant
+    const etablissement = await EtablissementService.toggleActiveStatus(etablissementId, false);
 
     res.json({
       success: true,
@@ -287,27 +313,25 @@ router.post('/:etablissementId/suspendre', authenticate, authorize('admin'), asy
  */
 router.get('/:etablissementId/stats', authenticate, async (req, res) => {
   try {
-    const { etablissementId } = req.params;
+    const etablissementId = Array.isArray(req.params.etablissementId) ? req.params.etablissementId[0] : req.params.etablissementId;
     const startDate = req.query.startDate as string;
     const endDate = req.query.endDate as string;
     
-    const etablissement = etablissements.find(e => e.id === etablissementId);
+    const etablissement = await EtablissementService.findById(etablissementId);
     
     if (!etablissement) {
-      res.status(404).json({
+      return res.status(404).json({
         success: false,
         error: 'Établissement non trouvé',
       });
-      return;
     }
 
     // Vérifier les permissions
     if (req.user?.role !== 'admin' && etablissement.gerantId !== req.user?.id) {
-      res.status(403).json({
+      return res.status(403).json({
         success: false,
         error: 'Accès non autorisé',
       });
-      return;
     }
 
     // Stats mockées
@@ -341,27 +365,25 @@ router.get('/:etablissementId/stats', authenticate, async (req, res) => {
  */
 router.get('/:etablissementId/diffusions', authenticate, async (req, res) => {
   try {
-    const { etablissementId } = req.params;
+    const etablissementId = Array.isArray(req.params.etablissementId) ? req.params.etablissementId[0] : req.params.etablissementId;
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
     
-    const etablissement = etablissements.find(e => e.id === etablissementId);
+    const etablissement = await EtablissementService.findById(etablissementId);
     
     if (!etablissement) {
-      res.status(404).json({
+      return res.status(404).json({
         success: false,
         error: 'Établissement non trouvé',
       });
-      return;
     }
 
     // Vérifier les permissions
     if (req.user?.role !== 'admin' && etablissement.gerantId !== req.user?.id) {
-      res.status(403).json({
+      return res.status(403).json({
         success: false,
         error: 'Accès non autorisé',
       });
-      return;
     }
 
     // Mock: retourner liste vide

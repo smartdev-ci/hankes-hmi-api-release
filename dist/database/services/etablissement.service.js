@@ -140,6 +140,41 @@ class EtablissementService {
             throw new errors_1.DatabaseError('Erreur lors du comptage des établissements actifs');
         }
     }
+    /**
+     * Récupérer les établissements créés par un utilisateur (admin ou recenseur)
+     */
+    static async findByCreateur(createurId) {
+        try {
+            const data = await index_1.prisma.etablissement.findMany({
+                where: { creePar: createurId },
+                include: {
+                    gerant: {
+                        select: {
+                            id: true,
+                            nom: true,
+                            email: true,
+                            telephone: true,
+                        },
+                    },
+                    createur: {
+                        select: {
+                            id: true,
+                            nom: true,
+                            email: true,
+                            role: true,
+                        },
+                    },
+                },
+                orderBy: { createdAt: 'desc' },
+            });
+            return data;
+        }
+        catch (error) {
+            if (error instanceof errors_1.DatabaseError)
+                throw error;
+            throw new errors_1.DatabaseError(`Erreur lors de la récupération des établissements créés par ${createurId}`);
+        }
+    }
     static async getStatsByVille() {
         try {
             const data = await index_1.prisma.etablissement.findMany({

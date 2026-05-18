@@ -2,13 +2,14 @@
  * Service de gestion des utilisateurs
  * Opérations CRUD sur la table users via Prisma
  */
+import { UserRole } from '@prisma/client';
 interface User {
     id: string;
     email: string;
     password: string;
     nom: string;
     telephone: string;
-    role: 'admin' | 'etablissement' | 'partenaire';
+    role: UserRole;
     isVerified: boolean;
     isActive: boolean;
     etablissementId: string | null;
@@ -20,7 +21,7 @@ interface UserInsert {
     password: string;
     nom: string;
     telephone: string;
-    role?: 'admin' | 'etablissement' | 'partenaire';
+    role?: UserRole;
     isVerified?: boolean;
     isActive?: boolean;
     etablissementId?: string | null;
@@ -30,7 +31,7 @@ interface UserUpdate {
     password?: string;
     nom?: string;
     telephone?: string;
-    role?: 'admin' | 'etablissement' | 'partenaire';
+    role?: UserRole;
     isVerified?: boolean;
     isActive?: boolean;
     etablissementId?: string | null;
@@ -44,7 +45,7 @@ export declare class UserService {
     static delete(id: string): Promise<void>;
     static verifyUser(id: string): Promise<User>;
     static toggleActiveStatus(id: string, isActive: boolean): Promise<User>;
-    static findByRole(role: User['role']): Promise<User[]>;
+    static findByRole(role: UserRole): Promise<User[]>;
     static count(): Promise<number>;
     static findByTelephone(telephone: string): Promise<User | null>;
 }

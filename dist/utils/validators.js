@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.paginationSchema = exports.generateRapportSchema = exports.updateDeviceSchema = exports.createDeviceSchema = exports.registerDeviceSchema = exports.createDiffusionSchema = exports.audioSyncSchema = exports.audioCaptureSchema = exports.updateEtablissementSchema = exports.createEtablissementSchema = exports.createUserSchema = exports.updateUserSchema = exports.changePasswordSchema = exports.passwordResetConfirmSchema = exports.passwordResetRequestSchema = exports.otpVerifySchema = exports.otpRequestSchema = exports.refreshTokenSchema = exports.registerSchema = exports.loginSchema = void 0;
+exports.paginationSchema = exports.generateRapportSchema = exports.updateDeviceSchema = exports.createDeviceSchema = exports.registerDeviceSchema = exports.createDiffusionSchema = exports.audioSyncSchema = exports.audioCaptureSchema = exports.updateEtablissementSchema = exports.createEtablissementSchema = exports.createArtisteProfileSchema = exports.createRecenseurUserSchema = exports.createUserSchema = exports.updateUserSchema = exports.changePasswordSchema = exports.passwordResetConfirmSchema = exports.passwordResetRequestSchema = exports.otpVerifySchema = exports.otpRequestSchema = exports.refreshTokenSchema = exports.registerSchema = exports.loginSchema = void 0;
 const zod_1 = require("zod");
 // ==================== AUTHENTIFICATION ====================
 exports.loginSchema = zod_1.z.object({
@@ -48,9 +48,27 @@ exports.createUserSchema = zod_1.z.object({
     password: zod_1.z.string().min(8),
     nom: zod_1.z.string().max(255),
     telephone: zod_1.z.string().regex(/^\+[1-9]\d{7,14}$/),
-    role: zod_1.z.enum(['admin', 'etablissement', 'partenaire']),
+    role: zod_1.z.enum(['admin', 'etablissement', 'partenaire', 'recenseur', 'artiste']),
     isVerified: zod_1.z.boolean().default(false),
     isActive: zod_1.z.boolean().default(true),
+});
+// Schéma pour créer un utilisateur recenseur (par un admin)
+exports.createRecenseurUserSchema = zod_1.z.object({
+    email: zod_1.z.string().email(),
+    password: zod_1.z.string().min(8),
+    nom: zod_1.z.string().max(255),
+    prenom: zod_1.z.string().max(255),
+    telephone: zod_1.z.string().regex(/^\+[1-9]\d{7,14}$/),
+    numeroPiece: zod_1.z.string().min(3).max(50),
+    typePiece: zod_1.z.enum(['cni', 'passeport', 'titre_sejour', 'carte_consulaire']),
+    dateNaissance: zod_1.z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    photoIdentiteUrl: zod_1.z.string().url(),
+});
+// Schéma pour créer un profil artiste
+exports.createArtisteProfileSchema = zod_1.z.object({
+    nomArtiste: zod_1.z.string().min(1).max(255),
+    bio: zod_1.z.string().max(1000).optional(),
+    isrc: zod_1.z.string().max(50).optional(),
 });
 // ==================== ETABLISSEMENTS ====================
 exports.createEtablissementSchema = zod_1.z.object({
@@ -65,6 +83,9 @@ exports.createEtablissementSchema = zod_1.z.object({
     email: zod_1.z.string().email().optional(),
     capacite: zod_1.z.number().int().positive().optional(),
     licence: zod_1.z.string().optional(),
+    gerantEmail: zod_1.z.string().email().optional(), // Email du gérant à créer/lié
+    gerantNom: zod_1.z.string().optional(), // Nom du gérant si création
+    gerantTelephone: zod_1.z.string().regex(/^\+[1-9]\d{7,14}$/).optional(), // Téléphone du gérant
 });
 exports.updateEtablissementSchema = exports.createEtablissementSchema.partial();
 // ==================== AUDIO ====================

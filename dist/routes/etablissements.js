@@ -4,9 +4,9 @@ const express_1 = require("express");
 const auth_1 = require("../middleware/auth");
 const middleware_1 = require("../middleware");
 const validators_1 = require("../utils/validators");
+const services_1 = require("../database/services");
+const client_1 = require("@prisma/client");
 const router = (0, express_1.Router)();
-// Mock database
-const etablissements = [];
 /**
  * GET /etablissements
  * Liste des établissements (avec pagination et filtres)
@@ -18,30 +18,30 @@ router.get('/', auth_1.authenticate, async (req, res) => {
         const ville = req.query.ville;
         const type = req.query.type;
         const search = req.query.search;
-        let filtered = [...etablissements];
+        let etablissements = await services_1.EtablissementService.findAll();
         // Filtres
         if (ville) {
-            filtered = filtered.filter(e => e.ville === ville);
+            etablissements = etablissements.filter(e => e.ville === ville);
         }
         if (type) {
-            filtered = filtered.filter(e => e.type === type);
+            etablissements = etablissements.filter(e => e.type === type);
         }
         if (search) {
-            filtered = filtered.filter(e => e.nom.toLowerCase().includes(search.toLowerCase()) ||
+            etablissements = etablissements.filter(e => e.nom.toLowerCase().includes(search.toLowerCase()) ||
                 e.adresse.toLowerCase().includes(search.toLowerCase()));
         }
         // Pagination
         const startIndex = (page - 1) * limit;
         const endIndex = startIndex + limit;
-        const paginatedResults = filtered.slice(startIndex, endIndex);
+        const paginatedResults = etablissements.slice(startIndex, endIndex);
         res.json({
             success: true,
             data: paginatedResults,
             pagination: {
                 page,
                 limit,
-                total: filtered.length,
-                totalPages: Math.ceil(filtered.length / limit),
+                total: etablissements.length,
+                totalPages: Math.ceil(etablissements.length / limit),
             },
         });
     }
@@ -54,26 +54,84 @@ router.get('/', auth_1.authenticate, async (req, res) => {
 });
 /**
  * POST /etablissements
- * Créer un nouvel établissement
+ * Créer un nouvel établissement (recenseur ou admin)
+ * Si gerantEmail est fourni, crée un utilisateur gérant lié
  */
 router.post('/', auth_1.authenticate, (0, middleware_1.validateRequest)(validators_1.createEtablissementSchema), async (req, res) => {
     try {
-        const etablissement = {
-            id: require('uuid').v4(),
-            ...req.body,
-            gerantId: req.user?.id,
-            isActive: true,
-            isVerified: false,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-        };
-        etablissements.push(etablissement);
-        // Mettre à jour l'utilisateur avec l'ID de l'établissement
-        // (dans une vraie implémentation, mettre à jour la BDD)
+        const { nom, type, adresse, ville, region, latitude, longitude, telephone, email, capacite, licence, gerantEmail, gerantNom, gerantTelephone } = req.body;
+        const createurId = req.user.id;
+        const createurRole = req.user.role;
+        // Vérifier que le créateur est admin ou recenseur
+        if (createurRole !== 'admin' && createurRole !== 'recenseur') {
+            return res.status(403).json({
+                success: false,
+                error: 'Seuls les admins et recenseurs peuvent créer des établissements',
+            });
+        }
+        let gerantId;
+        // Si les informations du gérant sont fournies, créer l'utilisateur gérant
+        if (gerantEmail && gerantNom && gerantTelephone) {
+            // Vérifier si l'email existe déjà
+            const existingUser = await services_1.UserService.findByEmail(gerantEmail);
+            if (existingUser) {
+                return res.status(409).json({
+                    success: false,
+                    error: 'Email du gérant déjà utilisé',
+                });
+            }
+            // Vérifier si le téléphone existe déjà
+            const existingPhone = await services_1.UserService.findByTelephone(gerantTelephone);
+            if (existingPhone) {
+                return res.status(409).json({
+                    success: false,
+                    error: 'Numéro de téléphone du gérant déjà utilisé',
+                });
+            }
+            // Générer un mot de passe temporaire
+            const tempPassword = Math.random().toString(36).slice(-8);
+            const hashedPassword = await (0, auth_1.hashPassword)(tempPassword);
+            // Créer l'utilisateur gérant
+            const gerant = await services_1.UserService.create({
+                email: gerantEmail,
+                password: hashedPassword,
+                nom: gerantNom,
+                telephone: gerantTelephone,
+                role: client_1.UserRole.etablissement,
+                isVerified: false,
+                isActive: true,
+            });
+            gerantId = gerant.id;
+            // TODO: Envoyer email/SMS au gérant avec ses identifiants
+            console.log(`Gérant créé: ${gerantEmail}, mot de passe temporaire: ${tempPassword}`);
+        }
+        else {
+            return res.status(400).json({
+                success: false,
+                error: 'Les informations du gérant (email, nom, téléphone) sont requises',
+            });
+        }
+        // Créer l'établissement
+        const etablissement = await services_1.EtablissementService.create({
+            nom,
+            type,
+            adresse,
+            ville,
+            region,
+            latitude: latitude || null,
+            longitude: longitude || null,
+            telephone,
+            email: email || null,
+            gerantId,
+            capacite: capacite || null,
+            licence: licence || null,
+            creePar: createurId,
+            roleCreateur: createurRole,
+        });
         res.status(201).json({
             success: true,
-            data: etablissement,
             message: 'Établissement créé avec succès',
+            data: etablissement,
         });
     }
     catch (error) {
@@ -89,22 +147,20 @@ router.post('/', auth_1.authenticate, (0, middleware_1.validateRequest)(validato
  */
 router.get('/:etablissementId', auth_1.authenticate, async (req, res) => {
     try {
-        const { etablissementId } = req.params;
-        const etablissement = etablissements.find(e => e.id === etablissementId);
+        const etablissementId = Array.isArray(req.params.etablissementId) ? req.params.etablissementId[0] : req.params.etablissementId;
+        const etablissement = await services_1.EtablissementService.findById(etablissementId);
         if (!etablissement) {
-            res.status(404).json({
+            return res.status(404).json({
                 success: false,
                 error: 'Établissement non trouvé',
             });
-            return;
         }
         // Vérifier les permissions
         if (req.user?.role !== 'admin' && etablissement.gerantId !== req.user?.id) {
-            res.status(403).json({
+            return res.status(403).json({
                 success: false,
                 error: 'Accès non autorisé',
             });
-            return;
         }
         res.json({
             success: true,
@@ -124,31 +180,26 @@ router.get('/:etablissementId', auth_1.authenticate, async (req, res) => {
  */
 router.put('/:etablissementId', auth_1.authenticate, (0, middleware_1.validateRequest)(validators_1.updateEtablissementSchema), async (req, res) => {
     try {
-        const { etablissementId } = req.params;
-        const etablissement = etablissements.find(e => e.id === etablissementId);
+        const etablissementId = Array.isArray(req.params.etablissementId) ? req.params.etablissementId[0] : req.params.etablissementId;
+        const etablissement = await services_1.EtablissementService.findById(etablissementId);
         if (!etablissement) {
-            res.status(404).json({
+            return res.status(404).json({
                 success: false,
                 error: 'Établissement non trouvé',
             });
-            return;
         }
         // Vérifier les permissions
         if (req.user?.role !== 'admin' && etablissement.gerantId !== req.user?.id) {
-            res.status(403).json({
+            return res.status(403).json({
                 success: false,
                 error: 'Accès non autorisé',
             });
-            return;
         }
         // Mise à jour
-        Object.assign(etablissement, {
-            ...req.body,
-            updatedAt: new Date(),
-        });
+        const updatedEtablissement = await services_1.EtablissementService.update(etablissementId, req.body);
         res.json({
             success: true,
-            data: etablissement,
+            data: updatedEtablissement,
             message: 'Établissement mis à jour avec succès',
         });
     }
@@ -165,16 +216,8 @@ router.put('/:etablissementId', auth_1.authenticate, (0, middleware_1.validateRe
  */
 router.delete('/:etablissementId', auth_1.authenticate, (0, auth_1.authorize)('admin'), async (req, res) => {
     try {
-        const { etablissementId } = req.params;
-        const index = etablissements.findIndex(e => e.id === etablissementId);
-        if (index === -1) {
-            res.status(404).json({
-                success: false,
-                error: 'Établissement non trouvé',
-            });
-            return;
-        }
-        etablissements.splice(index, 1);
+        const etablissementId = Array.isArray(req.params.etablissementId) ? req.params.etablissementId[0] : req.params.etablissementId;
+        await services_1.EtablissementService.delete(etablissementId);
         res.json({
             success: true,
             message: 'Établissement supprimé avec succès',
@@ -193,17 +236,8 @@ router.delete('/:etablissementId', auth_1.authenticate, (0, auth_1.authorize)('a
  */
 router.post('/:etablissementId/valider', auth_1.authenticate, (0, auth_1.authorize)('admin'), async (req, res) => {
     try {
-        const { etablissementId } = req.params;
-        const etablissement = etablissements.find(e => e.id === etablissementId);
-        if (!etablissement) {
-            res.status(404).json({
-                success: false,
-                error: 'Établissement non trouvé',
-            });
-            return;
-        }
-        etablissement.isVerified = true;
-        etablissement.updatedAt = new Date();
+        const etablissementId = Array.isArray(req.params.etablissementId) ? req.params.etablissementId[0] : req.params.etablissementId;
+        const etablissement = await services_1.EtablissementService.verifyEtablissement(etablissementId);
         res.json({
             success: true,
             data: etablissement,
@@ -223,19 +257,8 @@ router.post('/:etablissementId/valider', auth_1.authenticate, (0, auth_1.authori
  */
 router.post('/:etablissementId/suspendre', auth_1.authenticate, (0, auth_1.authorize)('admin'), async (req, res) => {
     try {
-        const { etablissementId } = req.params;
-        const { motif } = req.body;
-        const etablissement = etablissements.find(e => e.id === etablissementId);
-        if (!etablissement) {
-            res.status(404).json({
-                success: false,
-                error: 'Établissement non trouvé',
-            });
-            return;
-        }
-        etablissement.isActive = false;
-        etablissement.updatedAt = new Date();
-        // TODO: Envoyer notification au gérant
+        const etablissementId = Array.isArray(req.params.etablissementId) ? req.params.etablissementId[0] : req.params.etablissementId;
+        const etablissement = await services_1.EtablissementService.toggleActiveStatus(etablissementId, false);
         res.json({
             success: true,
             data: etablissement,
@@ -255,24 +278,22 @@ router.post('/:etablissementId/suspendre', auth_1.authenticate, (0, auth_1.autho
  */
 router.get('/:etablissementId/stats', auth_1.authenticate, async (req, res) => {
     try {
-        const { etablissementId } = req.params;
+        const etablissementId = Array.isArray(req.params.etablissementId) ? req.params.etablissementId[0] : req.params.etablissementId;
         const startDate = req.query.startDate;
         const endDate = req.query.endDate;
-        const etablissement = etablissements.find(e => e.id === etablissementId);
+        const etablissement = await services_1.EtablissementService.findById(etablissementId);
         if (!etablissement) {
-            res.status(404).json({
+            return res.status(404).json({
                 success: false,
                 error: 'Établissement non trouvé',
             });
-            return;
         }
         // Vérifier les permissions
         if (req.user?.role !== 'admin' && etablissement.gerantId !== req.user?.id) {
-            res.status(403).json({
+            return res.status(403).json({
                 success: false,
                 error: 'Accès non autorisé',
             });
-            return;
         }
         // Stats mockées
         const stats = {
@@ -304,24 +325,22 @@ router.get('/:etablissementId/stats', auth_1.authenticate, async (req, res) => {
  */
 router.get('/:etablissementId/diffusions', auth_1.authenticate, async (req, res) => {
     try {
-        const { etablissementId } = req.params;
+        const etablissementId = Array.isArray(req.params.etablissementId) ? req.params.etablissementId[0] : req.params.etablissementId;
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
-        const etablissement = etablissements.find(e => e.id === etablissementId);
+        const etablissement = await services_1.EtablissementService.findById(etablissementId);
         if (!etablissement) {
-            res.status(404).json({
+            return res.status(404).json({
                 success: false,
                 error: 'Établissement non trouvé',
             });
-            return;
         }
         // Vérifier les permissions
         if (req.user?.role !== 'admin' && etablissement.gerantId !== req.user?.id) {
-            res.status(403).json({
+            return res.status(403).json({
                 success: false,
                 error: 'Accès non autorisé',
             });
-            return;
         }
         // Mock: retourner liste vide
         res.json({

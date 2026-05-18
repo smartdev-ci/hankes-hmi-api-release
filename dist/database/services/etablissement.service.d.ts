@@ -2,6 +2,7 @@
  * Service de gestion des établissements
  * Opérations CRUD sur la table etablissements via Prisma
  */
+import { CreatorRole } from '@prisma/client';
 interface Etablissement {
     id: string;
     nom: string;
@@ -18,6 +19,8 @@ interface Etablissement {
     isVerified: boolean;
     capacite: number | null;
     licence: string | null;
+    creePar: string | null;
+    roleCreateur: CreatorRole | null;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -36,6 +39,8 @@ interface EtablissementInsert {
     isVerified?: boolean;
     capacite?: number | null;
     licence?: string | null;
+    creePar?: string | null;
+    roleCreateur?: CreatorRole | null;
 }
 interface EtablissementUpdate {
     nom?: string;
@@ -64,6 +69,10 @@ export declare class EtablissementService {
     static verifyEtablissement(id: string): Promise<Etablissement>;
     static toggleActiveStatus(id: string, isActive: boolean): Promise<Etablissement>;
     static countActive(): Promise<number>;
+    /**
+     * Récupérer les établissements créés par un utilisateur (admin ou recenseur)
+     */
+    static findByCreateur(createurId: string): Promise<Etablissement[]>;
     static getStatsByVille(): Promise<Array<{
         ville: string;
         count: number;

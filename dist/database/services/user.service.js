@@ -78,7 +78,9 @@ class UserService {
             if (error.code === 'P2002') {
                 throw new errors_1.ValidationError('Un utilisateur avec cet email existe déjà');
             }
-            if (error instanceof errors_1.DatabaseError || error instanceof errors_1.NotFoundError || error instanceof errors_1.ValidationError) {
+            if (error instanceof errors_1.DatabaseError ||
+                error instanceof errors_1.NotFoundError ||
+                error instanceof errors_1.ValidationError) {
                 throw error;
             }
             throw new errors_1.DatabaseError(`Erreur lors de la mise à jour de l'utilisateur ${id}`);
@@ -129,7 +131,7 @@ class UserService {
     }
     static async findByTelephone(telephone) {
         try {
-            const data = await index_1.prisma.user.findUnique({
+            const data = await index_1.prisma.user.findFirst({
                 where: { telephone },
             });
             return data || null;

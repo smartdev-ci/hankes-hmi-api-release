@@ -1,1 +1,19 @@
-Nothing should be ignored based on the provided file changes, as they only include TypeScript source files (.ts) which are legitimate code files that should be tracked in version control.
+```
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+
+# Environment variables
+.env*
+
+# IDE files
+.vscode/
+
+# Prisma
+.prisma/
+
+# Package lock
+package-lock.json
+```

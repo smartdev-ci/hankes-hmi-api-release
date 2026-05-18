@@ -5,6 +5,7 @@
 
 import { prisma } from '../index';
 import { DatabaseError, NotFoundError, ValidationError } from '../errors';
+import { CreatorRole } from '@prisma/client';
 
 interface Etablissement {
   id: string;
@@ -22,6 +23,8 @@ interface Etablissement {
   isVerified: boolean;
   capacite: number | null;
   licence: string | null;
+  creePar: string | null;
+  roleCreateur: CreatorRole | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -41,6 +44,8 @@ interface EtablissementInsert {
   isVerified?: boolean;
   capacite?: number | null;
   licence?: string | null;
+  creePar?: string | null;
+  roleCreateur?: CreatorRole | null;
 }
 
 interface EtablissementUpdate {
@@ -182,6 +187,40 @@ export class EtablissementService {
     } catch (error) {
       if (error instanceof DatabaseError) throw error;
       throw new DatabaseError('Erreur lors du comptage des établissements actifs');
+    }
+  }
+
+  /**
+   * Récupérer les établissements créés par un utilisateur (admin ou recenseur)
+   */
+  static async findByCreateur(createurId: string): Promise<Etablissement[]> {
+    try {
+      const data = await prisma.etablissement.findMany({
+        where: { creePar: createurId },
+        include: {
+          gerant: {
+            select: {
+              id: true,
+              nom: true,
+              email: true,
+              telephone: true,
+            },
+          },
+          createur: {
+            select: {
+              id: true,
+              nom: true,
+              email: true,
+              role: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      return data as unknown as Etablissement[];
+    } catch (error) {
+      if (error instanceof DatabaseError) throw error;
+      throw new DatabaseError(`Erreur lors de la récupération des établissements créés par ${createurId}`);
     }
   }
 

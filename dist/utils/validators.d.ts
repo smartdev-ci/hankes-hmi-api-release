@@ -103,12 +103,12 @@ export declare const createUserSchema: z.ZodObject<{
     password: z.ZodString;
     nom: z.ZodString;
     telephone: z.ZodString;
-    role: z.ZodEnum<["admin", "etablissement", "partenaire"]>;
+    role: z.ZodEnum<["admin", "etablissement", "partenaire", "recenseur", "artiste"]>;
     isVerified: z.ZodDefault<z.ZodBoolean>;
     isActive: z.ZodDefault<z.ZodBoolean>;
 }, "strip", z.ZodTypeAny, {
     email: string;
-    role: "admin" | "etablissement" | "partenaire";
+    role: "admin" | "etablissement" | "partenaire" | "recenseur" | "artiste";
     password: string;
     nom: string;
     telephone: string;
@@ -116,12 +116,56 @@ export declare const createUserSchema: z.ZodObject<{
     isActive: boolean;
 }, {
     email: string;
-    role: "admin" | "etablissement" | "partenaire";
+    role: "admin" | "etablissement" | "partenaire" | "recenseur" | "artiste";
     password: string;
     nom: string;
     telephone: string;
     isVerified?: boolean | undefined;
     isActive?: boolean | undefined;
+}>;
+export declare const createRecenseurUserSchema: z.ZodObject<{
+    email: z.ZodString;
+    password: z.ZodString;
+    nom: z.ZodString;
+    prenom: z.ZodString;
+    telephone: z.ZodString;
+    numeroPiece: z.ZodString;
+    typePiece: z.ZodEnum<["cni", "passeport", "titre_sejour", "carte_consulaire"]>;
+    dateNaissance: z.ZodString;
+    photoIdentiteUrl: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    email: string;
+    password: string;
+    nom: string;
+    telephone: string;
+    prenom: string;
+    numeroPiece: string;
+    typePiece: "cni" | "passeport" | "titre_sejour" | "carte_consulaire";
+    dateNaissance: string;
+    photoIdentiteUrl: string;
+}, {
+    email: string;
+    password: string;
+    nom: string;
+    telephone: string;
+    prenom: string;
+    numeroPiece: string;
+    typePiece: "cni" | "passeport" | "titre_sejour" | "carte_consulaire";
+    dateNaissance: string;
+    photoIdentiteUrl: string;
+}>;
+export declare const createArtisteProfileSchema: z.ZodObject<{
+    nomArtiste: z.ZodString;
+    bio: z.ZodOptional<z.ZodString>;
+    isrc: z.ZodOptional<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    nomArtiste: string;
+    bio?: string | undefined;
+    isrc?: string | undefined;
+}, {
+    nomArtiste: string;
+    bio?: string | undefined;
+    isrc?: string | undefined;
 }>;
 export declare const createEtablissementSchema: z.ZodObject<{
     nom: z.ZodString;
@@ -135,6 +179,9 @@ export declare const createEtablissementSchema: z.ZodObject<{
     email: z.ZodOptional<z.ZodString>;
     capacite: z.ZodOptional<z.ZodNumber>;
     licence: z.ZodOptional<z.ZodString>;
+    gerantEmail: z.ZodOptional<z.ZodString>;
+    gerantNom: z.ZodOptional<z.ZodString>;
+    gerantTelephone: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     type: "bar" | "maquis" | "cave" | "boite_de_nuit" | "restaurant" | "hotel";
     nom: string;
@@ -147,6 +194,9 @@ export declare const createEtablissementSchema: z.ZodObject<{
     longitude?: number | undefined;
     capacite?: number | undefined;
     licence?: string | undefined;
+    gerantEmail?: string | undefined;
+    gerantNom?: string | undefined;
+    gerantTelephone?: string | undefined;
 }, {
     type: "bar" | "maquis" | "cave" | "boite_de_nuit" | "restaurant" | "hotel";
     nom: string;
@@ -159,6 +209,9 @@ export declare const createEtablissementSchema: z.ZodObject<{
     longitude?: number | undefined;
     capacite?: number | undefined;
     licence?: string | undefined;
+    gerantEmail?: string | undefined;
+    gerantNom?: string | undefined;
+    gerantTelephone?: string | undefined;
 }>;
 export declare const updateEtablissementSchema: z.ZodObject<{
     nom: z.ZodOptional<z.ZodString>;
@@ -172,6 +225,9 @@ export declare const updateEtablissementSchema: z.ZodObject<{
     email: z.ZodOptional<z.ZodOptional<z.ZodString>>;
     capacite: z.ZodOptional<z.ZodOptional<z.ZodNumber>>;
     licence: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+    gerantEmail: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+    gerantNom: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+    gerantTelephone: z.ZodOptional<z.ZodOptional<z.ZodString>>;
 }, "strip", z.ZodTypeAny, {
     email?: string | undefined;
     type?: "bar" | "maquis" | "cave" | "boite_de_nuit" | "restaurant" | "hotel" | undefined;
@@ -184,6 +240,9 @@ export declare const updateEtablissementSchema: z.ZodObject<{
     longitude?: number | undefined;
     capacite?: number | undefined;
     licence?: string | undefined;
+    gerantEmail?: string | undefined;
+    gerantNom?: string | undefined;
+    gerantTelephone?: string | undefined;
 }, {
     email?: string | undefined;
     type?: "bar" | "maquis" | "cave" | "boite_de_nuit" | "restaurant" | "hotel" | undefined;
@@ -196,6 +255,9 @@ export declare const updateEtablissementSchema: z.ZodObject<{
     longitude?: number | undefined;
     capacite?: number | undefined;
     licence?: string | undefined;
+    gerantEmail?: string | undefined;
+    gerantNom?: string | undefined;
+    gerantTelephone?: string | undefined;
 }>;
 export declare const audioCaptureSchema: z.ZodObject<{
     etablissementId: z.ZodString;
@@ -271,18 +333,18 @@ export declare const createDiffusionSchema: z.ZodObject<{
     source: z.ZodEnum<["capture", "manual", "playlist"]>;
 }, "strip", z.ZodTypeAny, {
     etablissementId: string;
+    artiste: string;
     duree: number;
     musicId: string;
     titre: string;
-    artiste: string;
     playedAt: string;
     source: "capture" | "manual" | "playlist";
 }, {
     etablissementId: string;
+    artiste: string;
     duree: number;
     musicId: string;
     titre: string;
-    artiste: string;
     playedAt: string;
     source: "capture" | "manual" | "playlist";
 }>;
@@ -353,8 +415,8 @@ export declare const generateRapportSchema: z.ZodObject<{
     startDate: string;
     endDate: string;
     etablissementId?: string | undefined;
-    format?: "pdf" | "excel" | undefined;
     artiste?: string | undefined;
+    format?: "pdf" | "excel" | undefined;
 }>;
 export declare const paginationSchema: z.ZodObject<{
     page: z.ZodDefault<z.ZodNumber>;

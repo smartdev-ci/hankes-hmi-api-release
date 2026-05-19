@@ -50,7 +50,7 @@ class ACRCloudService {
             // Appel API avec axios
             const response = await axios_1.default.post(this.endpoint, formData, {
                 headers: {
-                    ...formData.getHeaders(),
+                    ...(formData.getHeaders ? formData.getHeaders() : {}),
                     'Content-Type': 'multipart/form-data',
                 },
                 timeout: 30000, // 30 secondes
@@ -70,7 +70,7 @@ class ACRCloudService {
                 title: music.title,
                 artist: music.artists?.map(a => a.name).join(', ') || 'Unknown',
                 isrc: music.external_metadata?.isrc || '',
-                confidence: music.score / 100, // Normaliser entre 0 et 1
+                confidence: music.score / 100,
                 label: music.external_metadata?.label,
                 releaseDate: music.external_metadata?.release_date,
                 genres: music.external_metadata?.genre_list?.map(g => g.name),
@@ -78,8 +78,8 @@ class ACRCloudService {
             return metadata;
         }
         catch (error) {
-            console.error('ACRCloud identification error:', error.message);
-            throw new Error(`Failed to identify audio: ${error.message}`);
+            console.error('ACRCloud identification error:', error?.message || error);
+            throw new Error(`Failed to identify audio: ${error?.message || error}`);
         }
     }
     /**
@@ -88,9 +88,12 @@ class ACRCloudService {
     async getFormDataLength(formData) {
         return new Promise((resolve, reject) => {
             const chunks = [];
+            // form-data is a stream; collect buffers
             formData.on('data', (chunk) => chunks.push(chunk));
             formData.on('end', () => resolve(Buffer.concat(chunks)));
             formData.on('error', reject);
+            // trigger stream
+            formData.pipe?.((() => { }));
         });
     }
     /**

@@ -2,36 +2,37 @@ openapi: 3.0.3
 info:
   title: HMIS API - Hankes Music Intelligence System
   description: |
-    API REST pour le système de reconnaissance musicale HMIS.
-    
+    API REST pour le systeme de reconnaissance musicale HMIS.
+
     ## Contexte
-    HMIS permet de recenser les établissements diffusant de la musique en Côte d'Ivoire
-    (bars, maquis, caves, boîtes de nuit) et de suivre les œuvres musicales diffusées
-    afin d'améliorer la transparence dans la gestion des droits d'auteur (BURIDA).
-    
-    ## Système d'authentification
+    HMIS permet de recenser les etablissements diffusant de la musique en Cote d'Ivoire
+    et de suivre les oeuvres musicales diffusees pour la gestion des droits d'auteur.
+
+    ## Systeme d'authentification
     - Authentification par JWT avec Refresh Token (Access : 15min, Refresh : 7j)
-    - OTP SMS via Twilio pour la validation (2FA, code 6 chiffres, TTL 10min)
-    - RBAC (Role-Based Access Control) à 3 niveaux métier
-    
-    ## Rôles disponibles
-    - **admin** : Accès complet — gestion globale, analytics, rapports, utilisateurs
-    - **etablissement** : Gérant d'établissement — capture audio, profil, historique
-    - **partenaire** : BURIDA et partenaires institutionnels — consultation rapports uniquement
-    
+    - OTP SMS pour la validation (code 6 chiffres, TTL 10min)
+    - RBAC par roles metier
+
+    ## Roles disponibles
+    - **admin** : acces complet, gestion globale, analytics, rapports, utilisateurs et recenseurs
+    - **recenseur** : agent terrain, creation d'utilisateurs rattachables et d'etablissements
+    - **etablissement** : gerant d'etablissement, capture audio, profil, historique
+    - **artiste** : inscription publique, recapitulatif de ses diffusions
+    - **partenaire** : BURIDA et partenaires institutionnels, consultation rapports uniquement
+
     ## Architecture
-    App Mobile (React Native) → API Gateway → Backend NestJS → PostgreSQL + ACRCloud/AudD
-    
+    App Mobile (React Native) -> API Express/TypeScript -> Supabase PostgreSQL via Prisma + ACRCloud
+
     ## Environnements
     - Production : https://api.hmis-project.ci/v1
     - Staging : https://staging-api.hmis-project.ci/v1
     - Local : http://localhost:3000/v1
   version: 2.0.0
   contact:
-    name: HMIS Support — HANKES
+    name: HMIS Support & HANKES
     email: contact@hmis-project.ci
   license:
-    name: Confidentiel — HANKES Technologies
+    name: Confidentiel & HANKES Technologies
     url: https://hmis-project.ci/license
 
 servers:
@@ -54,7 +55,7 @@ tags:
   - name: Reconnaissance
     description: Identification musicale via ACRCloud (principal) et AudD (fallback)
   - name: Diffusions
-    description: Logs de diffusion musicale — historique et statistiques
+    description: Logs de diffusion musicale & historique et statistiques
   - name: Dashboard
     description: KPIs, top musiques, carte géographique, évolution temporelle
   - name: Rapports
@@ -203,7 +204,7 @@ components:
           example: "+22501020304"
         role:
           type: string
-          enum: [admin, etablissement, partenaire]
+          enum: [admin, etablissement, partenaire, recenseur, artiste]
           default: etablissement
 
     PasswordResetRequest:
@@ -223,7 +224,7 @@ components:
       properties:
         token:
           type: string
-          description: Token de réinitialisation reçu par email (SES)
+          description: Token de réinitialisation reÃ§u par email (SES)
         newPassword:
           type: string
           minLength: 8
@@ -258,8 +259,8 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, etablissement, partenaire]
-        actif:
+          enum: [admin, etablissement, partenaire, recenseur, artiste]
+        isActive:
           type: boolean
         telephoneVerifie:
           type: boolean
@@ -297,7 +298,7 @@ components:
           pattern: '^\+[1-9]\d{7,14}$'
         role:
           type: string
-          enum: [admin, etablissement, partenaire]
+          enum: [admin, etablissement, partenaire, recenseur, artiste]
 
     UserUpdate:
       type: object
@@ -310,8 +311,8 @@ components:
           pattern: '^\+[1-9]\d{7,14}$'
         role:
           type: string
-          enum: [admin, etablissement, partenaire]
-        actif:
+          enum: [admin, etablissement, partenaire, recenseur, artiste]
+        isActive:
           type: boolean
 
     # ==================== ETABLISSEMENTS ====================
@@ -322,7 +323,7 @@ components:
         id:
           type: string
           format: uuid
-        utilisateurId:
+        userId:
           type: string
           format: uuid
           description: Propriétaire / gérant du compte
@@ -503,7 +504,7 @@ components:
         id:
           type: string
           format: uuid
-        utilisateurId:
+        userId:
           type: string
           format: uuid
         deviceId:
@@ -514,15 +515,15 @@ components:
             Android : Firebase Installation ID ou Android ID (UUID).
             iOS : UIDevice.identifierForVendor (UUID format RFC4122).
             Généré une seule fois à l'installation de l'app, persisté via react-native-keychain.
-        plateforme:
+        platform:
           type: string
           enum: [android, ios]
           description: Système d'exploitation du smartphone
-        versionOs:
+        osVersion:
           type: string
           description: Version du système d'exploitation
           example: "Android 14"
-        versionApp:
+        appVersion:
           type: string
           pattern: '^\d+\.\d+\.\d+$'
           description: Version de l'application HMIS installée (semver)
@@ -540,15 +541,15 @@ components:
             iOS : Apple Push Notification service (APNs) token.
             Doit être mis à jour à chaque lancement de l'application.
           nullable: true
-        actif:
+        isActive:
           type: boolean
           description: Appareil actif et autorisé à capturer
           default: true
-        dernierVuAt:
+        lastActiveAt:
           type: string
           format: date-time
           description: Dernière activité détectée (heartbeat ou synchronisation)
-        enregistreAt:
+        createdAt:
           type: string
           format: date-time
 
@@ -568,13 +569,13 @@ components:
             Android : Firebase Installation ID ou Android ID.
             iOS : UIDevice.identifierForVendor.
           example: "550e8400-e29b-41d4-a716-446655440000"
-        plateforme:
+        platform:
           type: string
           enum: [android, ios]
-        versionOs:
+        osVersion:
           type: string
           example: "Android 14"
-        versionApp:
+        appVersion:
           type: string
           pattern: '^\d+\.\d+\.\d+$'
           example: "1.2.0"
@@ -593,11 +594,11 @@ components:
       type: object
       description: Mise à jour à envoyer à chaque lancement de l'application
       properties:
-        versionApp:
+        appVersion:
           type: string
           pattern: '^\d+\.\d+\.\d+$'
           description: Nouvelle version de l'app si mise à jour effectuée
-        versionOs:
+        osVersion:
           type: string
           description: Nouvelle version OS si mise à jour effectuée
         pushToken:
@@ -621,7 +622,7 @@ components:
         etablissementId:
           type: string
           format: uuid
-          description: Identifiant de l'établissement où la capture a été effectuée
+          description: Identifiant de l'établissement oÃ¹ la capture a été effectuée
         deviceId:
           type: string
           pattern: '^[a-zA-Z0-9\-_]{16,64}$'
@@ -633,7 +634,7 @@ components:
             Extrait audio encodé en base64.
             Format source : WAV, 44100 Hz, mono (react-native-audio-recorder-player).
             Durée : 30 à 45 secondes recommandé (calibré pour ACRCloud/AudD).
-            Taille max décodée : 5 MB (≈ 700 000 caractères base64).
+            Taille max décodée : 5 MB (â‰ˆ 700 000 caractères base64).
           maxLength: 700000
         dureeSecondes:
           type: integer
@@ -673,7 +674,7 @@ components:
       required:
         - captures
       description: |
-        Synchronisation batch des captures effectuées en mode offline (WatermelonDB → API).
+        Synchronisation batch des captures effectuées en mode offline (WatermelonDB â†’ API).
         Déclenché automatiquement par react-native-background-fetch à la reconnexion réseau.
         Maximum 50 captures par batch.
       properties:
@@ -690,7 +691,7 @@ components:
       properties:
         total:
           type: integer
-          description: Nombre total de captures reçues dans le batch
+          description: Nombre total de captures reÃ§ues dans le batch
         traiteesOk:
           type: integer
           description: Captures acceptées et mises en queue de reconnaissance
@@ -832,7 +833,7 @@ components:
             en_attente : dans la Bull Queue, en attente de worker disponible
             en_traitement : worker actif, appel ACRCloud/AudD en cours
             identifie : reconnaissance réussie (score >= 0.60), log créé en base
-            non_identifie : musique inconnue ou score < seuil — capture ignorée
+            non_identifie : musique inconnue ou score < seuil & capture ignorée
             erreur : échec technique (timeout, format invalide, quota API dépassé)
         diffusionId:
           type: string
@@ -867,10 +868,10 @@ components:
           description: Nombre total d'établissements enregistrés
         etablissementsActifs:
           type: integer
-          description: Établissements avec statut = actif
+          description: Ã‰tablissements avec statut = actif
         etablissementsEnAttente:
           type: integer
-          description: Établissements en attente de validation admin
+          description: Ã‰tablissements en attente de validation admin
         totalDiffusionsAujourdhui:
           type: integer
           description: Diffusions identifiées sur les dernières 24h
@@ -896,7 +897,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DiffusionJour'
-          description: Évolution du nombre de diffusions sur les 30 derniers jours
+          description: Ã‰volution du nombre de diffusions sur les 30 derniers jours
 
     TopMusique:
       type: object
@@ -1090,7 +1091,7 @@ components:
         id:
           type: string
           format: uuid
-        utilisateurId:
+        userId:
           type: string
           format: uuid
         deviceId:
@@ -1168,9 +1169,98 @@ components:
               description: Page courante (1-indexé)
             limit:
               type: integer
-              description: Éléments par page
+              description: Ã‰léments par page
             totalPages:
               type: integer
+
+
+    RecenseurCreate:
+      type: object
+      required: [email, password, nom, prenom, telephone, numeroPiece, typePiece, dateNaissance, photoIdentiteUrl]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        nom:
+          type: string
+          maxLength: 255
+        prenom:
+          type: string
+          maxLength: 255
+        telephone:
+          type: string
+          pattern: '^\+[1-9]\d{7,14}$'
+        numeroPiece:
+          type: string
+          minLength: 3
+          maxLength: 50
+        typePiece:
+          type: string
+          enum: [cni, passeport, titre_sejour, carte_consulaire]
+        dateNaissance:
+          type: string
+          format: date
+        photoIdentiteUrl:
+          type: string
+          format: uri
+
+    EtablissementUserCreate:
+      type: object
+      required: [email, password, nom, telephone]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        nom:
+          type: string
+          maxLength: 255
+        telephone:
+          type: string
+          pattern: '^\+[1-9]\d{7,14}$'
+        role:
+          type: string
+          enum: [etablissement, partenaire]
+          default: etablissement
+        isVerified:
+          type: boolean
+          default: false
+        isActive:
+          type: boolean
+          default: true
+
+    EtablissementMemberAssign:
+      type: object
+      required: [userId]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        role:
+          type: string
+          default: staff
+
+    SupabaseDatabaseHealth:
+      type: object
+      properties:
+        connected:
+          type: boolean
+        database:
+          type: string
+          enum: [postgresql]
+        provider:
+          type: string
+          enum: [supabase-prisma]
+        latencyMs:
+          type: integer
+        status:
+          type: string
+          enum: [connected, disconnected]
 
   parameters:
     PageParam:
@@ -1423,7 +1513,7 @@ paths:
       tags: [Authentication]
       summary: Vérifier un OTP SMS
       description: |
-        Vérifie le code OTP reçu par SMS.
+        Vérifie le code OTP reÃ§u par SMS.
         Compare le hash SHA256 du code saisi avec celui stocké en Redis.
         En cas de succès : active le compte (purpose=REGISTER) ou émet un JWT (purpose=LOGIN).
       operationId: verifyOTP
@@ -1550,7 +1640,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [admin, etablissement, partenaire]
+            enum: [admin, etablissement, partenaire, recenseur, artiste]
         - name: actif
           in: query
           schema:
@@ -1599,6 +1689,89 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+
+  /utilisateurs/etablissement:
+    post:
+      tags: [Users]
+      summary: Creer un utilisateur rattachable a un etablissement
+      description: Accessible aux admins et recenseurs. L'utilisateur pourra ensuite etre utilise comme gerant ou membre d'etablissement.
+      operationId: createEtablissementUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EtablissementUserCreate'
+      responses:
+        '201':
+          description: Utilisateur cree
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Email ou telephone deja utilise
+
+  /utilisateurs/recenseur:
+    post:
+      tags: [Users]
+      summary: Creer un agent recenseur
+      description: Accessible admin uniquement. Cree l'utilisateur role recenseur et son profil d'identite.
+      operationId: createRecenseur
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecenseurCreate'
+      responses:
+        '201':
+          description: Agent recenseur cree
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Email ou telephone deja utilise
+
+  /utilisateurs/recenseurs:
+    get:
+      tags: [Users]
+      summary: Lister les agents recenseurs
+      operationId: listRecenseurs
+      responses:
+        '200':
+          description: Liste des recenseurs
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /utilisateurs/recenseurs/{recenseurId}/etablissements:
+    get:
+      tags: [Users]
+      summary: Lister les etablissements crees par un recenseur
+      operationId: listEtablissementsByRecenseur
+      parameters:
+        - name: recenseurId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Etablissements crees par le recenseur
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /utilisateurs/{userId}:
     parameters:
       - name: userId
@@ -1731,7 +1904,7 @@ paths:
               $ref: '#/components/schemas/EtablissementCreate'
       responses:
         '201':
-          description: Établissement créé, en attente de validation admin
+          description: Ã‰tablissement créé, en attente de validation admin
           content:
             application/json:
               schema:
@@ -1778,7 +1951,7 @@ paths:
               $ref: '#/components/schemas/EtablissementUpdate'
       responses:
         '200':
-          description: Établissement mis à jour
+          description: Ã‰tablissement mis à jour
           content:
             application/json:
               schema:
@@ -1807,7 +1980,7 @@ paths:
             format: uuid
       responses:
         '200':
-          description: Établissement validé et tracking activé
+          description: Ã‰tablissement validé et tracking activé
           content:
             application/json:
               schema:
@@ -1843,7 +2016,7 @@ paths:
                   description: Motif de suspension (sera notifié au gérant)
       responses:
         '200':
-          description: Établissement suspendu
+          description: Ã‰tablissement suspendu
           content:
             application/json:
               schema:
@@ -1853,6 +2026,84 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+
+  /etablissements/{etablissementId}/users:
+    get:
+      tags: [Etablissements]
+      summary: Lister les utilisateurs lies a un etablissement
+      operationId: listEtablissementUsers
+      parameters:
+        - name: etablissementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Utilisateurs lies a l'etablissement
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Etablissements]
+      summary: Lier un utilisateur existant a un etablissement
+      operationId: assignUserToEtablissement
+      parameters:
+        - name: etablissementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EtablissementMemberAssign'
+      responses:
+        '201':
+          description: Utilisateur lie a l'etablissement
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /etablissements/{etablissementId}/users/{userId}:
+    delete:
+      tags: [Etablissements]
+      summary: Retirer un utilisateur lie a un etablissement
+      operationId: removeUserFromEtablissement
+      parameters:
+        - name: etablissementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Utilisateur retire de l'etablissement
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /etablissements/{etablissementId}/stats:
     get:
       tags: [Etablissements]
@@ -1951,7 +2202,7 @@ paths:
       tags: [Audio]
       summary: Uploader un extrait audio
       description: |
-        Reçoit un extrait audio depuis l'application mobile.
+        ReÃ§oit un extrait audio depuis l'application mobile.
         Valide le format et la taille, stocke temporairement sur S3 (TTL 24h),
         puis ajoute un job dans la Bull Queue pour traitement asynchrone par ReconnaissanceWorker.
         
@@ -1978,7 +2229,7 @@ paths:
                     description: ID à utiliser pour suivre le statut via GET /audio/statut/{captureId}
                   message:
                     type: string
-                    example: "Capture reçue et en cours de traitement"
+                    example: "Capture reÃ§ue et en cours de traitement"
                   queuePosition:
                     type: integer
                     description: Position dans la Bull Queue (informatif)
@@ -1991,7 +2242,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          description: Établissement suspendu ou inactif
+          description: Ã‰tablissement suspendu ou inactif
           content:
             application/json:
               schema:
@@ -2017,7 +2268,7 @@ paths:
               $ref: '#/components/schemas/AudioSyncRequest'
       responses:
         '207':
-          description: Multi-Status — résultat détaillé par capture
+          description: Multi-Status & résultat détaillé par capture
           content:
             application/json:
               schema:
@@ -2086,7 +2337,7 @@ paths:
           in: query
           schema:
             type: string
-          description: Filtrer par code ISRC (traçabilité des œuvres pour BURIDA)
+          description: Filtrer par code ISRC (traÃ§abilité des Å“uvres pour BURIDA)
         - name: sourceApi
           in: query
           schema:
@@ -2590,7 +2841,7 @@ paths:
     post:
       tags: [Etablissements]
       summary: Uploader une image d'établissement
-      description: "Upload vers AWS S3. Formats acceptés : JPEG, PNG, WebP. Taille max : 5 MB."
+      description: "Validation multipart image. Retourne 501 tant que Supabase Storage ou S3 n est pas configure. Formats acceptes : JPEG, PNG, WebP. Taille max : 5 MB."
       operationId: uploadImage
       requestBody:
         required: true
@@ -2664,6 +2915,27 @@ paths:
         '503':
           description: Système dégradé (base de données inaccessible)
 
+
+  /health/database:
+    get:
+      tags: [Health & Monitoring]
+      summary: Verifier la connexion Supabase/PostgreSQL via Prisma
+      operationId: databaseHealthCheck
+      security: []
+      responses:
+        '200':
+          description: Etat de la connexion database
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/SupabaseDatabaseHealth'
+        '503':
+          description: Base de donnees inaccessible
   /health/ready:
     get:
       tags: [Health & Monitoring]
@@ -2677,7 +2949,7 @@ paths:
         '503':
           description: Service non prêt (migrations en cours, connexion BDD absente)
 
-  /metrics:
+  /health/metrics:
     get:
       tags: [Health & Monitoring]
       summary: Métriques applicatives (Prometheus)
@@ -2698,3 +2970,4 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+

@@ -123,6 +123,31 @@ export declare const createUserSchema: z.ZodObject<{
     isVerified?: boolean | undefined;
     isActive?: boolean | undefined;
 }>;
+export declare const createEtablissementUserSchema: z.ZodObject<{
+    email: z.ZodString;
+    password: z.ZodString;
+    nom: z.ZodString;
+    telephone: z.ZodString;
+    role: z.ZodDefault<z.ZodEnum<["etablissement", "partenaire"]>>;
+    isVerified: z.ZodDefault<z.ZodBoolean>;
+    isActive: z.ZodDefault<z.ZodBoolean>;
+}, "strip", z.ZodTypeAny, {
+    email: string;
+    role: "etablissement" | "partenaire";
+    password: string;
+    nom: string;
+    telephone: string;
+    isVerified: boolean;
+    isActive: boolean;
+}, {
+    email: string;
+    password: string;
+    nom: string;
+    telephone: string;
+    role?: "etablissement" | "partenaire" | undefined;
+    isVerified?: boolean | undefined;
+    isActive?: boolean | undefined;
+}>;
 export declare const createRecenseurUserSchema: z.ZodObject<{
     email: z.ZodString;
     password: z.ZodString;
@@ -167,7 +192,7 @@ export declare const createArtisteProfileSchema: z.ZodObject<{
     bio?: string | undefined;
     isrc?: string | undefined;
 }>;
-export declare const createEtablissementSchema: z.ZodObject<{
+export declare const createEtablissementSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     nom: z.ZodString;
     type: z.ZodEnum<["bar", "maquis", "cave", "boite_de_nuit", "restaurant", "hotel"]>;
     adresse: z.ZodString;
@@ -179,9 +204,11 @@ export declare const createEtablissementSchema: z.ZodObject<{
     email: z.ZodOptional<z.ZodString>;
     capacite: z.ZodOptional<z.ZodNumber>;
     licence: z.ZodOptional<z.ZodString>;
+    gerantId: z.ZodOptional<z.ZodString>;
     gerantEmail: z.ZodOptional<z.ZodString>;
     gerantNom: z.ZodOptional<z.ZodString>;
     gerantTelephone: z.ZodOptional<z.ZodString>;
+    gerantPassword: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     type: "bar" | "maquis" | "cave" | "boite_de_nuit" | "restaurant" | "hotel";
     nom: string;
@@ -194,9 +221,11 @@ export declare const createEtablissementSchema: z.ZodObject<{
     longitude?: number | undefined;
     capacite?: number | undefined;
     licence?: string | undefined;
+    gerantId?: string | undefined;
     gerantEmail?: string | undefined;
     gerantNom?: string | undefined;
     gerantTelephone?: string | undefined;
+    gerantPassword?: string | undefined;
 }, {
     type: "bar" | "maquis" | "cave" | "boite_de_nuit" | "restaurant" | "hotel";
     nom: string;
@@ -209,25 +238,92 @@ export declare const createEtablissementSchema: z.ZodObject<{
     longitude?: number | undefined;
     capacite?: number | undefined;
     licence?: string | undefined;
+    gerantId?: string | undefined;
     gerantEmail?: string | undefined;
     gerantNom?: string | undefined;
     gerantTelephone?: string | undefined;
+    gerantPassword?: string | undefined;
+}>, {
+    type: "bar" | "maquis" | "cave" | "boite_de_nuit" | "restaurant" | "hotel";
+    nom: string;
+    telephone: string;
+    adresse: string;
+    ville: string;
+    region: string;
+    email?: string | undefined;
+    latitude?: number | undefined;
+    longitude?: number | undefined;
+    capacite?: number | undefined;
+    licence?: string | undefined;
+    gerantId?: string | undefined;
+    gerantEmail?: string | undefined;
+    gerantNom?: string | undefined;
+    gerantTelephone?: string | undefined;
+    gerantPassword?: string | undefined;
+}, {
+    type: "bar" | "maquis" | "cave" | "boite_de_nuit" | "restaurant" | "hotel";
+    nom: string;
+    telephone: string;
+    adresse: string;
+    ville: string;
+    region: string;
+    email?: string | undefined;
+    latitude?: number | undefined;
+    longitude?: number | undefined;
+    capacite?: number | undefined;
+    licence?: string | undefined;
+    gerantId?: string | undefined;
+    gerantEmail?: string | undefined;
+    gerantNom?: string | undefined;
+    gerantTelephone?: string | undefined;
+    gerantPassword?: string | undefined;
+}>, {
+    type: "bar" | "maquis" | "cave" | "boite_de_nuit" | "restaurant" | "hotel";
+    nom: string;
+    telephone: string;
+    adresse: string;
+    ville: string;
+    region: string;
+    email?: string | undefined;
+    latitude?: number | undefined;
+    longitude?: number | undefined;
+    capacite?: number | undefined;
+    licence?: string | undefined;
+    gerantId?: string | undefined;
+    gerantEmail?: string | undefined;
+    gerantNom?: string | undefined;
+    gerantTelephone?: string | undefined;
+    gerantPassword?: string | undefined;
+}, {
+    type: "bar" | "maquis" | "cave" | "boite_de_nuit" | "restaurant" | "hotel";
+    nom: string;
+    telephone: string;
+    adresse: string;
+    ville: string;
+    region: string;
+    email?: string | undefined;
+    latitude?: number | undefined;
+    longitude?: number | undefined;
+    capacite?: number | undefined;
+    licence?: string | undefined;
+    gerantId?: string | undefined;
+    gerantEmail?: string | undefined;
+    gerantNom?: string | undefined;
+    gerantTelephone?: string | undefined;
+    gerantPassword?: string | undefined;
 }>;
 export declare const updateEtablissementSchema: z.ZodObject<{
-    nom: z.ZodOptional<z.ZodString>;
+    email: z.ZodOptional<z.ZodOptional<z.ZodString>>;
     type: z.ZodOptional<z.ZodEnum<["bar", "maquis", "cave", "boite_de_nuit", "restaurant", "hotel"]>>;
+    nom: z.ZodOptional<z.ZodString>;
+    telephone: z.ZodOptional<z.ZodString>;
     adresse: z.ZodOptional<z.ZodString>;
     ville: z.ZodOptional<z.ZodString>;
     region: z.ZodOptional<z.ZodString>;
     latitude: z.ZodOptional<z.ZodOptional<z.ZodNumber>>;
     longitude: z.ZodOptional<z.ZodOptional<z.ZodNumber>>;
-    telephone: z.ZodOptional<z.ZodString>;
-    email: z.ZodOptional<z.ZodOptional<z.ZodString>>;
     capacite: z.ZodOptional<z.ZodOptional<z.ZodNumber>>;
     licence: z.ZodOptional<z.ZodOptional<z.ZodString>>;
-    gerantEmail: z.ZodOptional<z.ZodOptional<z.ZodString>>;
-    gerantNom: z.ZodOptional<z.ZodOptional<z.ZodString>>;
-    gerantTelephone: z.ZodOptional<z.ZodOptional<z.ZodString>>;
 }, "strip", z.ZodTypeAny, {
     email?: string | undefined;
     type?: "bar" | "maquis" | "cave" | "boite_de_nuit" | "restaurant" | "hotel" | undefined;
@@ -240,9 +336,6 @@ export declare const updateEtablissementSchema: z.ZodObject<{
     longitude?: number | undefined;
     capacite?: number | undefined;
     licence?: string | undefined;
-    gerantEmail?: string | undefined;
-    gerantNom?: string | undefined;
-    gerantTelephone?: string | undefined;
 }, {
     email?: string | undefined;
     type?: "bar" | "maquis" | "cave" | "boite_de_nuit" | "restaurant" | "hotel" | undefined;
@@ -255,9 +348,16 @@ export declare const updateEtablissementSchema: z.ZodObject<{
     longitude?: number | undefined;
     capacite?: number | undefined;
     licence?: string | undefined;
-    gerantEmail?: string | undefined;
-    gerantNom?: string | undefined;
-    gerantTelephone?: string | undefined;
+}>;
+export declare const assignEtablissementUserSchema: z.ZodObject<{
+    userId: z.ZodString;
+    role: z.ZodDefault<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    role: string;
+    userId: string;
+}, {
+    userId: string;
+    role?: string | undefined;
 }>;
 export declare const audioCaptureSchema: z.ZodObject<{
     etablissementId: z.ZodString;
@@ -368,33 +468,45 @@ export declare const registerDeviceSchema: z.ZodObject<{
     pushToken?: string | undefined;
 }>;
 export declare const createDeviceSchema: z.ZodObject<{
-    nom: z.ZodString;
-    type: z.ZodEnum<["mobile", "tablette", "desktop", "autre"]>;
+    deviceId: z.ZodString;
+    platform: z.ZodEnum<["ios", "android"]>;
+    appVersion: z.ZodString;
+    osVersion: z.ZodString;
     etablissementId: z.ZodOptional<z.ZodString>;
-    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+    pushToken: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
-    type: "mobile" | "tablette" | "desktop" | "autre";
-    nom: string;
+    deviceId: string;
+    platform: "ios" | "android";
+    appVersion: string;
+    osVersion: string;
     etablissementId?: string | undefined;
-    metadata?: Record<string, any> | undefined;
+    pushToken?: string | undefined;
 }, {
-    type: "mobile" | "tablette" | "desktop" | "autre";
-    nom: string;
+    deviceId: string;
+    platform: "ios" | "android";
+    appVersion: string;
+    osVersion: string;
     etablissementId?: string | undefined;
-    metadata?: Record<string, any> | undefined;
+    pushToken?: string | undefined;
 }>;
 export declare const updateDeviceSchema: z.ZodObject<{
-    nom: z.ZodOptional<z.ZodString>;
-    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
-    isActive: z.ZodOptional<z.ZodBoolean>;
+    etablissementId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    appVersion: z.ZodOptional<z.ZodString>;
+    osVersion: z.ZodOptional<z.ZodString>;
+    pushToken: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    lastActiveAt: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
-    nom?: string | undefined;
-    isActive?: boolean | undefined;
-    metadata?: Record<string, any> | undefined;
+    etablissementId?: string | null | undefined;
+    appVersion?: string | undefined;
+    osVersion?: string | undefined;
+    pushToken?: string | null | undefined;
+    lastActiveAt?: string | undefined;
 }, {
-    nom?: string | undefined;
-    isActive?: boolean | undefined;
-    metadata?: Record<string, any> | undefined;
+    etablissementId?: string | null | undefined;
+    appVersion?: string | undefined;
+    osVersion?: string | undefined;
+    pushToken?: string | null | undefined;
+    lastActiveAt?: string | undefined;
 }>;
 export declare const generateRapportSchema: z.ZodObject<{
     type: z.ZodEnum<["etablissement", "periode", "artiste"]>;

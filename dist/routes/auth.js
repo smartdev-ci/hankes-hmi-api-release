@@ -14,7 +14,6 @@ const etablissement_service_1 = require("../database/services/etablissement.serv
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const config_1 = require("../config");
-const client_1 = require("@prisma/client");
 const router = (0, express_1.Router)();
 // ─── Helper : cast config strings → StringValue pour jsonwebtoken ────────────
 // jsonwebtoken >= 9.x exige StringValue (ex: "15m", "7d") et non string brut.
@@ -57,7 +56,7 @@ router.post('/register', (0, index_1.validateRequest)(validators_1.registerSchem
         });
         // Créer l'établissement si fourni (pour rôle etablissement)
         let etablissementId = null;
-        if (role === client_1.UserRole.etablissement && etablissement) {
+        if (role === 'etablissement' && etablissement) {
             const newEtablissement = await etablissement_service_1.EtablissementService.create({
                 nom: etablissement.nom,
                 type: etablissement.type,
@@ -74,7 +73,7 @@ router.post('/register', (0, index_1.validateRequest)(validators_1.registerSchem
         await otp_service_1.OTPService.create({
             phone: telephone, // ← était `telephone`
             code: otpCode,
-            purpose: client_1.OtpPurpose.REGISTER,
+            purpose: 'REGISTER',
             expiresAt: new Date(Date.now() + 10 * 60 * 1000),
         });
         // TODO: Envoyer SMS via Twilio
@@ -257,7 +256,7 @@ router.post('/otp/verifier', (0, index_1.validateRequest)(validators_1.otpVerify
             return res.status(400).json({ success: false, error: 'Code OTP invalide ou expiré' });
         }
         await otp_service_1.OTPService.delete(otpRecord.id);
-        if (otpRecord.purpose === client_1.OtpPurpose.REGISTER) {
+        if (otpRecord.purpose === 'REGISTER') {
             const user = await user_service_1.UserService.findByTelephone(phone);
             if (user) {
                 await user_service_1.UserService.update(user.id, { isVerified: true });

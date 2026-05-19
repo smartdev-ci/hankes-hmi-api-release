@@ -2,7 +2,7 @@
  * Service de gestion des utilisateurs
  * Opérations CRUD sur la table users via Prisma
  */
-import { UserRole } from '@prisma/client';
+import { UserRole } from '../../types';
 interface User {
     id: string;
     email: string;

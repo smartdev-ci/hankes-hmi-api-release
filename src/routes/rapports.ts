@@ -1,180 +1,117 @@
 import { Router } from 'express';
-import { authenticate, authorize } from '../middleware/auth';
+import { authenticate } from '../middleware/auth';
+import { RapportService } from '../database/services';
 
 const router = Router();
+const getParam = (value: string | string[]): string => Array.isArray(value) ? value[0] : value;
 
-// Mock database
-const rapports: any[] = [];
-
-/**
- * GET /rapports
- * Lister les rapports
- */
 router.get('/', authenticate, async (req, res) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
-    const typeRapport = req.query.typeRapport as string;
-    const startDate = req.query.startDate as string;
-    const endDate = req.query.endDate as string;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const type = req.query.typeRapport as string | undefined;
+    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
+    const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
 
-    let filtered = [...rapports];
+    let rapports = await RapportService.findAll();
 
-    // Filtres
-    if (typeRapport) {
-      filtered = filtered.filter(r => r.typeRapport === typeRapport);
+    if (req.user?.role !== 'admin') {
+      rapports = rapports.filter((rapport) => rapport.generePar === req.user?.id);
+    }
+    if (type) {
+      rapports = rapports.filter((rapport) => rapport.type === type);
     }
     if (startDate) {
-      filtered = filtered.filter(r => new Date(r.dateGeneration) >= new Date(startDate));
+      rapports = rapports.filter((rapport) => rapport.dateGeneration >= startDate);
     }
     if (endDate) {
-      filtered = filtered.filter(r => new Date(r.dateGeneration) <= new Date(endDate));
+      rapports = rapports.filter((rapport) => rapport.dateGeneration <= endDate);
     }
 
-    // Pagination
     const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    const paginatedResults = filtered.slice(startIndex, endIndex);
 
     res.json({
       success: true,
-      data: paginatedResults,
+      data: rapports.slice(startIndex, startIndex + limit),
       pagination: {
         page,
         limit,
-        total: filtered.length,
-        totalPages: Math.ceil(filtered.length / limit),
+        total: rapports.length,
+        totalPages: Math.ceil(rapports.length / limit),
       },
     });
   } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-/**
- * POST /rapports
- * Générer un rapport
- */
 router.post('/', authenticate, async (req, res) => {
   try {
-    const { typeRapport, dateDebut, dateFin, format } = req.body;
-
-    // Créer le rapport
-    const rapport: any = {
-      id: require('uuid').v4(),
+    const {
       typeRapport,
+      type,
       dateDebut,
       dateFin,
+      format,
+      etablissementId,
+      metadata,
+    } = req.body;
+
+    const rapport = await RapportService.create({
+      type: type || typeRapport,
+      dateDebut: new Date(dateDebut),
+      dateFin: new Date(dateFin),
       format: format || 'pdf',
       statut: 'en_cours',
-      dateGeneration: new Date(),
-      generePar: req.user?.id,
-    };
-
-    rapports.push(rapport);
-
-    // Simulation de génération asynchrone
-    setTimeout(() => {
-      rapport.statut = 'termine';
-      rapport.urlTelechargement = `/rapports/${rapport.id}/telecharger`;
-    }, 2000);
+      generePar: req.user!.id,
+      etablissementId: etablissementId || null,
+      metadata: metadata || null,
+    });
 
     res.status(202).json({
       success: true,
-      message: 'Rapport en cours de génération',
-      rapport: {
-        id: rapport.id,
-        typeRapport: rapport.typeRapport,
-        statut: rapport.statut,
-        dateGeneration: rapport.dateGeneration,
-      },
+      message: 'Rapport en cours de generation',
+      data: rapport,
     });
   } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-/**
- * GET /rapports/:rapportId
- * Récupérer les détails d'un rapport
- */
 router.get('/:rapportId', authenticate, async (req, res) => {
   try {
-    const { rapportId } = req.params;
-    
-    const rapport = rapports.find(r => r.id === rapportId);
-    
-    if (!rapport) {
-      res.status(404).json({
-        success: false,
-        error: 'Rapport non trouvé',
-      });
-      return;
+    const rapport = await RapportService.findById(getParam(req.params.rapportId));
+
+    if (!rapport || (req.user?.role !== 'admin' && rapport.generePar !== req.user?.id)) {
+      return res.status(404).json({ success: false, error: 'Rapport non trouve' });
     }
 
-    res.json({
-      success: true,
-      rapport: {
-        id: rapport.id,
-        typeRapport: rapport.typeRapport,
-        dateDebut: rapport.dateDebut,
-        dateFin: rapport.dateFin,
-        format: rapport.format,
-        statut: rapport.statut,
-        dateGeneration: rapport.dateGeneration,
-        urlTelechargement: rapport.urlTelechargement,
-      },
-    });
+    return res.json({ success: true, data: rapport });
   } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 
-/**
- * GET /rapports/:rapportId/telecharger
- * Télécharger un rapport
- */
 router.get('/:rapportId/telecharger', authenticate, async (req, res) => {
   try {
-    const { rapportId } = req.params;
-    
-    const rapport = rapports.find(r => r.id === rapportId);
-    
-    if (!rapport) {
-      res.status(404).json({
-        success: false,
-        error: 'Rapport non trouvé',
-      });
-      return;
+    const rapport = await RapportService.findById(getParam(req.params.rapportId));
+
+    if (!rapport || (req.user?.role !== 'admin' && rapport.generePar !== req.user?.id)) {
+      return res.status(404).json({ success: false, error: 'Rapport non trouve' });
+    }
+    if (rapport.statut !== 'termine' || !rapport.fichierUrl) {
+      return res.status(409).json({ success: false, error: 'Rapport non pret au telechargement' });
     }
 
-    if (rapport.statut !== 'termine') {
-      res.status(400).json({
-        success: false,
-        error: 'Rapport non prêt au téléchargement',
-      });
-      return;
-    }
-
-    // Mock: retourne un fichier fictif
-    res.setHeader('Content-Type', `application/${rapport.format}`);
-    res.setHeader('Content-Disposition', `attachment; filename="rapport_${rapport.id}.${rapport.format}"`);
-    
-    res.send('Contenu du rapport (fichier mocké)');
-  } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
+    return res.json({
+      success: true,
+      data: {
+        url: rapport.fichierUrl,
+        format: rapport.format,
+      },
     });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 

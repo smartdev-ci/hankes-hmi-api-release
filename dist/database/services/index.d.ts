@@ -15,3 +15,4 @@ export { NotificationService } from './notification.service';
 export { RapportService } from './rapport.service';
 export { RecenseurProfileService } from './recenseur-profile.service';
 export { ArtisteProfileService } from './artiste-profile.service';
+export { SupabasePrismaService } from './supabase-prisma.service';

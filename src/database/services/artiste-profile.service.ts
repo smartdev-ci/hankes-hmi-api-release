@@ -244,14 +244,40 @@ export class ArtisteProfileService {
       const startDate = options?.startDate;
       const endDate = options?.endDate;
 
-      // Construire le filtre de date
-      const whereClause: any = {
-        music: {
+      const artisteProfile = await prisma.artisteProfile.findUnique({
+        where: { userId: artisteUserId },
+      });
+
+      if (!artisteProfile) {
+        throw new NotFoundError('Profil artiste non trouvÃ©');
+      }
+
+      const musicMatchClauses: any[] = [
+        {
           artisteMusiques: {
             some: {
               artisteUserId,
             },
           },
+        },
+        {
+          artiste: {
+            contains: artisteProfile.nomArtiste,
+            mode: 'insensitive',
+          },
+        },
+      ];
+
+      if (artisteProfile.isrc) {
+        musicMatchClauses.push({
+          isrc: artisteProfile.isrc,
+        });
+      }
+
+      // Construire le filtre de date et de matching artiste.
+      const whereClause: any = {
+        music: {
+          OR: musicMatchClauses,
         },
       };
 

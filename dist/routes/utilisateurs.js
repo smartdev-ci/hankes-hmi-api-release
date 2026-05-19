@@ -5,7 +5,6 @@ const auth_1 = require("../middleware/auth");
 const middleware_1 = require("../middleware");
 const validators_1 = require("../utils/validators");
 const services_1 = require("../database/services");
-const client_1 = require("@prisma/client");
 const router = (0, express_1.Router)();
 /**
  * GET /utilisateurs
@@ -117,6 +116,67 @@ router.post('/', auth_1.authenticate, (0, auth_1.authorize)('admin'), (0, middle
     }
 });
 /**
+ * POST /utilisateurs/etablissement
+ * Creer un utilisateur rattachable a un etablissement (admin ou recenseur)
+ */
+router.post('/etablissement', auth_1.authenticate, (0, middleware_1.validateRequest)(validators_1.createEtablissementUserSchema), async (req, res) => {
+    try {
+        if (req.user?.role !== 'admin' && req.user?.role !== 'recenseur') {
+            return res.status(403).json({
+                success: false,
+                error: 'Seuls les admins et recenseurs peuvent creer ces utilisateurs',
+            });
+        }
+        const { email, password, nom, telephone, role, isVerified, isActive } = req.body;
+        const [existingUser, existingPhone] = await Promise.all([
+            services_1.UserService.findByEmail(email),
+            services_1.UserService.findByTelephone(telephone),
+        ]);
+        if (existingUser) {
+            return res.status(409).json({
+                success: false,
+                error: 'Email deja utilise',
+            });
+        }
+        if (existingPhone) {
+            return res.status(409).json({
+                success: false,
+                error: 'Numero de telephone deja utilise',
+            });
+        }
+        const hashedPassword = await (0, auth_1.hashPassword)(password);
+        const user = await services_1.UserService.create({
+            email,
+            password: hashedPassword,
+            nom,
+            telephone,
+            role,
+            isVerified,
+            isActive,
+            etablissementId: null,
+        });
+        return res.status(201).json({
+            success: true,
+            message: 'Utilisateur etablissement cree avec succes',
+            data: {
+                id: user.id,
+                email: user.email,
+                nom: user.nom,
+                telephone: user.telephone,
+                role: user.role,
+                isVerified: user.isVerified,
+                isActive: user.isActive,
+            },
+        });
+    }
+    catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error.message,
+        });
+    }
+});
+/**
  * POST /utilisateurs/recenseur
  * Créer un utilisateur recenseur avec son profil (admin uniquement)
  */
@@ -147,7 +207,7 @@ router.post('/recenseur', auth_1.authenticate, (0, auth_1.authorize)('admin'), (
             password: hashedPassword,
             nom: `${prenom} ${nom}`,
             telephone,
-            role: client_1.UserRole.recenseur,
+            role: 'recenseur',
             isVerified: false,
             isActive: true,
         });

@@ -5,7 +5,9 @@
 
 import { prisma } from '../index';
 import { DatabaseError, NotFoundError, ValidationError } from '../errors';
-import { CreatorRole } from '@prisma/client';
+
+type CreatorRole = 'admin' | 'recenseur';
+type ManagedUserRole = 'etablissement';
 
 interface Etablissement {
   id: string;
@@ -64,6 +66,23 @@ interface EtablissementUpdate {
   licence?: string | null;
 }
 
+interface GerantInput {
+  email: string;
+  password: string;
+  nom: string;
+  telephone: string;
+  isVerified?: boolean;
+  isActive?: boolean;
+}
+
+interface CreateWithGerantInput {
+  etablissement: Omit<EtablissementInsert, 'gerantId' | 'creePar' | 'roleCreateur'>;
+  createurId: string;
+  createurRole: CreatorRole;
+  gerantId?: string;
+  gerant?: GerantInput;
+}
+
 export class EtablissementService {
   static async findAll(): Promise<Etablissement[]> {
     try {
@@ -101,6 +120,94 @@ export class EtablissementService {
       }
       if (error instanceof DatabaseError || error instanceof ValidationError) throw error;
       throw new DatabaseError('Erreur lors de la création de l\'établissement');
+    }
+  }
+
+  static async createWithGerant(input: CreateWithGerantInput): Promise<any> {
+    try {
+      if (!['admin', 'recenseur'].includes(input.createurRole)) {
+        throw new ValidationError('Seuls les admins et recenseurs peuvent creer des etablissements');
+      }
+
+      if (!input.gerantId && !input.gerant) {
+        throw new ValidationError('Un gerant existant ou les informations du gerant sont requis');
+      }
+
+      return await prisma.$transaction(async (tx) => {
+        let gerantId = input.gerantId;
+
+        if (gerantId) {
+          const gerant = await tx.user.findUnique({ where: { id: gerantId } });
+          if (!gerant) {
+            throw new ValidationError('Gerant introuvable');
+          }
+          if (gerant.role !== 'etablissement') {
+            throw new ValidationError('Le gerant doit etre un utilisateur avec le role etablissement');
+          }
+
+          const existingEtablissement = await tx.etablissement.findUnique({
+            where: { gerantId },
+          });
+          if (existingEtablissement) {
+            throw new ValidationError('Cet utilisateur est deja gerant d un etablissement');
+          }
+        } else if (input.gerant) {
+          const gerant = await tx.user.create({
+            data: {
+              email: input.gerant.email,
+              password: input.gerant.password,
+              nom: input.gerant.nom,
+              telephone: input.gerant.telephone,
+              role: 'etablissement' as ManagedUserRole,
+              isVerified: input.gerant.isVerified ?? false,
+              isActive: input.gerant.isActive ?? true,
+              etablissementId: null,
+            },
+          });
+          gerantId = gerant.id;
+        }
+
+        const etablissement = await tx.etablissement.create({
+          data: {
+            ...input.etablissement,
+            gerantId: gerantId!,
+            creePar: input.createurId,
+            roleCreateur: input.createurRole,
+          },
+          include: {
+            gerant: {
+              select: {
+                id: true,
+                email: true,
+                nom: true,
+                telephone: true,
+                role: true,
+              },
+            },
+            createur: {
+              select: {
+                id: true,
+                email: true,
+                nom: true,
+                role: true,
+              },
+            },
+          },
+        });
+
+        await tx.user.update({
+          where: { id: gerantId! },
+          data: { etablissementId: etablissement.id },
+        });
+
+        return etablissement;
+      });
+    } catch (error: any) {
+      if (error.code === 'P2002') {
+        throw new ValidationError('Email, telephone ou gerant deja utilise');
+      }
+      if (error instanceof DatabaseError || error instanceof ValidationError) throw error;
+      throw new DatabaseError('Erreur lors de la creation transactionnelle de l etablissement');
     }
   }
 
@@ -224,6 +331,106 @@ export class EtablissementService {
     }
   }
 
+  static async addUserToEtablissement(
+    etablissementId: string,
+    userId: string,
+    role: string,
+    assignePar: string
+  ): Promise<any> {
+    try {
+      const [etablissement, user, assigneur] = await Promise.all([
+        prisma.etablissement.findUnique({ where: { id: etablissementId } }),
+        prisma.user.findUnique({ where: { id: userId } }),
+        prisma.user.findUnique({ where: { id: assignePar } }),
+      ]);
+
+      if (!etablissement) throw new NotFoundError('Etablissement non trouve');
+      if (!user) throw new NotFoundError('Utilisateur non trouve');
+      if (!assigneur) throw new NotFoundError('Utilisateur assignateur non trouve');
+
+      if (etablissement.gerantId === userId) {
+        throw new ValidationError('Le gerant est deja lie a cet etablissement');
+      }
+
+      return await prisma.etablissementUser.create({
+        data: {
+          etablissementId,
+          userId,
+          role,
+          assignePar,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              nom: true,
+              email: true,
+              telephone: true,
+              role: true,
+              isActive: true,
+            },
+          },
+        },
+      });
+    } catch (error: any) {
+      if (error.code === 'P2002') {
+        throw new ValidationError('Cet utilisateur est deja lie a cet etablissement');
+      }
+      if (error instanceof DatabaseError || error instanceof NotFoundError || error instanceof ValidationError) throw error;
+      throw new DatabaseError('Erreur lors de l association utilisateur-etablissement');
+    }
+  }
+
+  static async findUsers(etablissementId: string): Promise<any[]> {
+    try {
+      return await prisma.etablissementUser.findMany({
+        where: { etablissementId },
+        include: {
+          user: {
+            select: {
+              id: true,
+              nom: true,
+              email: true,
+              telephone: true,
+              role: true,
+              isActive: true,
+            },
+          },
+          assigne: {
+            select: {
+              id: true,
+              nom: true,
+              email: true,
+            },
+          },
+        },
+        orderBy: { assigneAt: 'desc' },
+      });
+    } catch (error) {
+      if (error instanceof DatabaseError) throw error;
+      throw new DatabaseError('Erreur lors de la recuperation des utilisateurs lies');
+    }
+  }
+
+  static async removeUser(etablissementId: string, userId: string): Promise<void> {
+    try {
+      await prisma.etablissementUser.delete({
+        where: {
+          etablissementId_userId: {
+            etablissementId,
+            userId,
+          },
+        },
+      });
+    } catch (error: any) {
+      if (error.code === 'P2025') {
+        throw new NotFoundError('Association utilisateur-etablissement non trouvee');
+      }
+      if (error instanceof DatabaseError || error instanceof NotFoundError) throw error;
+      throw new DatabaseError('Erreur lors du retrait de l utilisateur lie');
+    }
+  }
+
   static async getStatsByVille(): Promise<Array<{ ville: string; count: number }>> {
     try {
       const data = await prisma.etablissement.findMany({
@@ -232,9 +439,10 @@ export class EtablissementService {
       });
 
       const stats = new Map<string, number>();
-      data.forEach((etab) => {
-        const count = stats.get(etab.ville) || 0;
-        stats.set(etab.ville, count + 1);
+      data.forEach((etab: { ville: string | null }) => {
+        const ville = etab.ville ?? '';
+        const count = stats.get(ville) || 0;
+        stats.set(ville, count + 1);
       });
 
       return Array.from(stats.entries()).map(([ville, count]) => ({ ville, count }));

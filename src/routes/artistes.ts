@@ -3,7 +3,6 @@ import { authenticate, hashPassword } from '../middleware/auth';
 import { validateRequest } from '../middleware';
 import { createArtisteProfileSchema } from '../utils/validators';
 import { UserService, ArtisteProfileService } from '../database/services';
-import { UserRole } from '@prisma/client';
 import { NotFoundError, ValidationError } from '../database/errors';
 import { z } from 'zod';
 
@@ -50,7 +49,7 @@ router.post('/register', validateRequest(createArtisteProfileSchema.extend({
       password: hashedPassword,
       nom,
       telephone,
-      role: UserRole.artiste,
+      role: 'artiste',
       isVerified: false,
       isActive: true,
     });

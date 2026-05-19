@@ -5,7 +5,8 @@
 
 import { prisma } from '../index';
 import { DatabaseError, NotFoundError, ValidationError } from '../errors';
-import { PieceIdentiteType } from '@prisma/client';
+
+type PieceIdentiteType = 'cni' | 'passeport' | 'titre_sejour' | 'carte_consulaire';
 
 export interface RecenseurProfile {
   id: string;

@@ -1,98 +1,61 @@
 import { Router } from 'express';
-import { authenticate, authorize } from '../middleware/auth';
+import { authenticate } from '../middleware/auth';
+import { DiffusionService } from '../database/services';
 
 const router = Router();
+const getParam = (value: string | string[]): string => Array.isArray(value) ? value[0] : value;
 
-// Mock database
-const diffusions: any[] = [];
-
-/**
- * GET /diffusions
- * Liste des diffusions (avec filtres et pagination)
- */
 router.get('/', authenticate, async (req, res) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
-    const etablissementId = req.query.etablissementId as string;
-    const startDate = req.query.startDate as string;
-    const endDate = req.query.endDate as string;
-    const artiste = req.query.artiste as string;
-    const isrc = req.query.isrc as string;
-    const sourceApi = req.query.sourceApi as string;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const etablissementId = req.query.etablissementId as string | undefined;
+    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
+    const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
+    const artiste = req.query.artiste as string | undefined;
 
-    let filtered = [...diffusions];
+    let diffusions = etablissementId
+      ? await DiffusionService.findByEtablissement(etablissementId)
+      : await DiffusionService.findAll();
 
-    // Filtres
-    if (etablissementId) {
-      filtered = filtered.filter(d => d.etablissementId === etablissementId);
-    }
     if (startDate) {
-      filtered = filtered.filter(d => new Date(d.timestampDiffusion) >= new Date(startDate));
+      diffusions = diffusions.filter((d) => d.playedAt >= startDate);
     }
     if (endDate) {
-      filtered = filtered.filter(d => new Date(d.timestampDiffusion) <= new Date(endDate));
+      diffusions = diffusions.filter((d) => d.playedAt <= endDate);
     }
     if (artiste) {
-      filtered = filtered.filter(d => d.artiste.toLowerCase().includes(artiste.toLowerCase()));
-    }
-    if (isrc) {
-      filtered = filtered.filter(d => d.isrc === isrc);
-    }
-    if (sourceApi) {
-      filtered = filtered.filter(d => d.sourceApi === sourceApi);
+      diffusions = diffusions.filter((d) => d.artiste.toLowerCase().includes(artiste.toLowerCase()));
     }
 
-    // Pagination
     const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    const paginatedResults = filtered.slice(startIndex, endIndex);
 
     res.json({
       success: true,
-      data: paginatedResults,
+      data: diffusions.slice(startIndex, startIndex + limit),
       pagination: {
         page,
         limit,
-        total: filtered.length,
-        totalPages: Math.ceil(filtered.length / limit),
+        total: diffusions.length,
+        totalPages: Math.ceil(diffusions.length / limit),
       },
     });
   } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-/**
- * GET /diffusions/:diffusionId
- * Récupérer les détails d'une diffusion
- */
 router.get('/:diffusionId', authenticate, async (req, res) => {
   try {
-    const { diffusionId } = req.params;
-    
-    const diffusion = diffusions.find(d => d.id === diffusionId);
-    
+    const diffusion = await DiffusionService.findById(getParam(req.params.diffusionId));
+
     if (!diffusion) {
-      res.status(404).json({
-        success: false,
-        error: 'Diffusion non trouvée',
-      });
-      return;
+      return res.status(404).json({ success: false, error: 'Diffusion non trouvee' });
     }
 
-    res.json({
-      success: true,
-      data: diffusion,
-    });
+    return res.json({ success: true, data: diffusion });
   } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 

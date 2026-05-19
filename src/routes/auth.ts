@@ -18,7 +18,9 @@ import { EtablissementService } from '../database/services/etablissement.service
 import bcrypt from 'bcryptjs';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { config } from '../config';
-import { UserRole, OtpPurpose } from '@prisma/client';
+import { UserRole } from '../types';
+
+type OtpPurposeValue = 'REGISTER' | 'LOGIN' | 'PASSWORD_RESET' | 'TWO_FACTOR';
 
 const router = Router();
 
@@ -69,7 +71,7 @@ router.post('/register', validateRequest(registerSchema), async (req, res) => {
 
     // Créer l'établissement si fourni (pour rôle etablissement)
     let etablissementId = null;
-    if (role === UserRole.etablissement && etablissement) {
+    if (role === 'etablissement' && etablissement) {
       const newEtablissement = await EtablissementService.create({
         nom: etablissement.nom,
         type: etablissement.type,
@@ -87,7 +89,7 @@ router.post('/register', validateRequest(registerSchema), async (req, res) => {
     await OTPService.create({
       phone: telephone,               // ← était `telephone`
       code: otpCode,
-      purpose: OtpPurpose.REGISTER,
+      purpose: 'REGISTER',
       expiresAt: new Date(Date.now() + 10 * 60 * 1000),
     });
 
@@ -279,7 +281,7 @@ router.post('/otp/envoyer', validateRequest(otpRequestSchema), async (req, res) 
     await OTPService.create({
       phone: phone,
       code: otpCode,
-      purpose: purpose as OtpPurpose,
+      purpose: purpose as OtpPurposeValue,
       expiresAt: new Date(Date.now() + 10 * 60 * 1000),
     });
 
@@ -314,7 +316,7 @@ router.post('/otp/verifier', validateRequest(otpVerifySchema), async (req, res) 
 
     await OTPService.delete(otpRecord.id);
 
-    if (otpRecord.purpose === OtpPurpose.REGISTER) {
+    if (otpRecord.purpose === 'REGISTER') {
       const user = await UserService.findByTelephone(phone);
       if (user) {
         await UserService.update(user.id, { isVerified: true });

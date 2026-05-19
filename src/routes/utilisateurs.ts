@@ -1,9 +1,14 @@
 import { Router } from 'express';
 import { authenticate, authorize, hashPassword } from '../middleware/auth';
 import { validateRequest } from '../middleware';
-import { createUserSchema, updateUserSchema, createRecenseurUserSchema } from '../utils/validators';
+import {
+  createUserSchema,
+  updateUserSchema,
+  createRecenseurUserSchema,
+  createEtablissementUserSchema,
+} from '../utils/validators';
 import { UserService, RecenseurProfileService, EtablissementService } from '../database/services';
-import { UserRole } from '@prisma/client';
+import { UserRole } from '../types';
 
 const router = Router();
 
@@ -125,6 +130,73 @@ router.post('/', authenticate, authorize('admin'), validateRequest(createUserSch
 });
 
 /**
+ * POST /utilisateurs/etablissement
+ * Creer un utilisateur rattachable a un etablissement (admin ou recenseur)
+ */
+router.post('/etablissement', authenticate, validateRequest(createEtablissementUserSchema), async (req, res) => {
+  try {
+    if (req.user?.role !== 'admin' && req.user?.role !== 'recenseur') {
+      return res.status(403).json({
+        success: false,
+        error: 'Seuls les admins et recenseurs peuvent creer ces utilisateurs',
+      });
+    }
+
+    const { email, password, nom, telephone, role, isVerified, isActive } = req.body;
+
+    const [existingUser, existingPhone] = await Promise.all([
+      UserService.findByEmail(email),
+      UserService.findByTelephone(telephone),
+    ]);
+
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        error: 'Email deja utilise',
+      });
+    }
+
+    if (existingPhone) {
+      return res.status(409).json({
+        success: false,
+        error: 'Numero de telephone deja utilise',
+      });
+    }
+
+    const hashedPassword = await hashPassword(password);
+    const user = await UserService.create({
+      email,
+      password: hashedPassword,
+      nom,
+      telephone,
+      role,
+      isVerified,
+      isActive,
+      etablissementId: null,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Utilisateur etablissement cree avec succes',
+      data: {
+        id: user.id,
+        email: user.email,
+        nom: user.nom,
+        telephone: user.telephone,
+        role: user.role,
+        isVerified: user.isVerified,
+        isActive: user.isActive,
+      },
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
  * POST /utilisateurs/recenseur
  * Créer un utilisateur recenseur avec son profil (admin uniquement)
  */
@@ -159,7 +231,7 @@ router.post('/recenseur', authenticate, authorize('admin'), validateRequest(crea
       password: hashedPassword,
       nom: `${prenom} ${nom}`,
       telephone,
-      role: UserRole.recenseur,
+      role: 'recenseur',
       isVerified: false,
       isActive: true,
     });

@@ -156,13 +156,13 @@ model AudioCapture {
   format          String
   taille          Int
   statut          AudioCaptureStatut @default(pending)
-  deviceId        String
+  deviceId        String?
   capturedAt      DateTime
   syncedAt        DateTime?
   processedAt     DateTime?
   createdAt       DateTime           @default(now())
 
-  device        Device           @relation(fields: [deviceId],        references: [id], onDelete: SetNull)
+  device        Device?          @relation(fields: [deviceId],        references: [id], onDelete: SetNull)
   etablissement Etablissement    @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
   user          User             @relation(fields: [userId],          references: [id], onDelete: Cascade)
   recognition   MusicRecognition?

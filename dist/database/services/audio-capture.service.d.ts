@@ -11,7 +11,7 @@ interface AudioCapture {
     format: string;
     taille: number;
     statut: 'pending' | 'processing' | 'identified' | 'failed';
-    deviceId: string;
+    deviceId: string | null;
     capturedAt: Date;
     syncedAt: Date | null;
     processedAt: Date | null;
@@ -25,7 +25,7 @@ interface AudioCaptureInsert {
     format: string;
     taille: number;
     statut?: 'pending' | 'processing' | 'identified' | 'failed';
-    deviceId: string;
+    deviceId?: string | null;
     capturedAt: Date;
     syncedAt?: Date | null;
     processedAt?: Date | null;
@@ -38,7 +38,7 @@ interface AudioCaptureUpdate {
     format?: string;
     taille?: number;
     statut?: 'pending' | 'processing' | 'identified' | 'failed';
-    deviceId?: string;
+    deviceId?: string | null;
     capturedAt?: Date;
     syncedAt?: Date | null;
     processedAt?: Date | null;

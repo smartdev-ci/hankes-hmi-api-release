@@ -60,6 +60,19 @@ export class NotificationService {
     }
   }
 
+  static async findByUser(userId: string): Promise<Notification[]> {
+    try {
+      const data = await prisma.notification.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+      });
+      return data;
+    } catch (error) {
+      if (error instanceof DatabaseError) throw error;
+      throw new DatabaseError(`Erreur lors de la rÃ©cupÃ©ration des notifications de l'utilisateur ${userId}`);
+    }
+  }
+
   static async create(data: NotificationInsert): Promise<Notification> {
     try {
       const result = await prisma.notification.create({
@@ -88,6 +101,25 @@ export class NotificationService {
       }
       if (error instanceof DatabaseError || error instanceof NotFoundError) throw error;
       throw new DatabaseError('Erreur lors de la marque comme lue');
+    }
+  }
+
+  static async markAllAsRead(userId: string): Promise<number> {
+    try {
+      const result = await prisma.notification.updateMany({
+        where: {
+          userId,
+          estLue: false,
+        },
+        data: {
+          estLue: true,
+          dateLecture: new Date(),
+        },
+      });
+      return result.count;
+    } catch (error) {
+      if (error instanceof DatabaseError) throw error;
+      throw new DatabaseError('Erreur lors de la marque globale comme lue');
     }
   }
 

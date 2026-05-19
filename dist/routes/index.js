@@ -15,10 +15,12 @@ const devices_1 = __importDefault(require("./devices"));
 const notifications_1 = __importDefault(require("./notifications"));
 const audio_1 = __importDefault(require("./audio"));
 const upload_1 = __importDefault(require("./upload"));
+const artistes_1 = __importDefault(require("./artistes"));
 const router = (0, express_1.Router)();
 // Routes publiques
 router.use('/auth', auth_1.default);
 router.use('/health', health_1.default);
+router.use('/artistes', artistes_1.default);
 // Routes protégées
 router.use('/etablissements', etablissements_1.default);
 router.use('/diffusions', diffusions_1.default);

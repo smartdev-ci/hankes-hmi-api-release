@@ -14,8 +14,12 @@ const etablissement_service_1 = require("../database/services/etablissement.serv
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const config_1 = require("../config");
-const client_1 = require("@prisma/client");
 const router = (0, express_1.Router)();
+// ─── Helper : cast config strings → StringValue pour jsonwebtoken ────────────
+// jsonwebtoken >= 9.x exige StringValue (ex: "15m", "7d") et non string brut.
+// Le cast via `as unknown as` est le pattern recommandé quand la config est typée string.
+const accessExpiresIn = config_1.config.jwt.expiresIn;
+const refreshExpiresIn = config_1.config.jwt.refreshExpiresIn;
 /**
  * POST /auth/register
  * Inscription d'un nouvel utilisateur
@@ -41,19 +45,6 @@ router.post('/register', (0, index_1.validateRequest)(validators_1.registerSchem
         }
         // Hash du mot de passe
         const hashedPassword = await bcryptjs_1.default.hash(password, 12);
-        // Créer l'établissement si fourni (pour rôle etablissement)
-        let etablissementId = null;
-        if (role === client_1.UserRole.etablissement && etablissement) {
-            const newEtablissement = await etablissement_service_1.EtablissementService.create({
-                nom: etablissement.nom,
-                type: etablissement.type,
-                ville: etablissement.ville,
-                adresse: etablissement.adresse,
-                telephone: telephone,
-                gerantId: '', // Sera mis à jour après création user
-            });
-            etablissementId = newEtablissement.id;
-        }
         // Créer l'utilisateur
         const user = await user_service_1.UserService.create({
             email,
@@ -61,21 +52,35 @@ router.post('/register', (0, index_1.validateRequest)(validators_1.registerSchem
             nom,
             telephone,
             role: role,
-            etablissementId,
+            etablissementId: null,
         });
-        // Générer et envoyer OTP
+        // Créer l'établissement si fourni (pour rôle etablissement)
+        let etablissementId = null;
+        if (role === 'etablissement' && etablissement) {
+            const newEtablissement = await etablissement_service_1.EtablissementService.create({
+                nom: etablissement.nom,
+                type: etablissement.type,
+                ville: etablissement.ville,
+                region: etablissement.region,
+                adresse: etablissement.adresse,
+                telephone: telephone,
+                gerantId: user.id,
+            });
+            etablissementId = newEtablissement.id;
+        }
+        // FIX #2 : `telephone` → `phone` (nom du champ dans OTPInsert)
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         await otp_service_1.OTPService.create({
-            telephone,
+            phone: telephone, // ← était `telephone`
             code: otpCode,
-            purpose: client_1.OtpPurpose.REGISTER,
-            expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+            purpose: 'REGISTER',
+            expiresAt: new Date(Date.now() + 10 * 60 * 1000),
         });
         // TODO: Envoyer SMS via Twilio
         console.log(`OTP pour ${telephone}: ${otpCode}`);
-        // Si établissement créé, mettre à jour avec le gerantId
+        // Mettre à jour l'utilisateur avec etablissementId si applicable
         if (etablissementId) {
-            await etablissement_service_1.EtablissementService.update(etablissementId, { gerantId: user.id });
+            await user_service_1.UserService.update(user.id, { etablissementId });
         }
         return res.status(201).json({
             success: true,
@@ -99,48 +104,31 @@ router.post('/register', (0, index_1.validateRequest)(validators_1.registerSchem
 router.post('/login', (0, index_1.validateRequest)(validators_1.loginSchema), async (req, res) => {
     try {
         const { email, password, deviceId } = req.body;
-        // Trouver l'utilisateur
         const user = await user_service_1.UserService.findByEmail(email);
         if (!user) {
-            return res.status(401).json({
-                success: false,
-                error: 'Identifiants invalides',
-            });
+            return res.status(401).json({ success: false, error: 'Identifiants invalides' });
         }
-        // Vérifier le mot de passe
         const isValidPassword = await bcryptjs_1.default.compare(password, user.password);
         if (!isValidPassword) {
-            return res.status(401).json({
-                success: false,
-                error: 'Identifiants invalides',
-            });
+            return res.status(401).json({ success: false, error: 'Identifiants invalides' });
         }
-        // Vérifier si le compte est vérifié
         if (!user.isVerified) {
-            return res.status(403).json({
-                success: false,
-                error: 'Compte non vérifié',
-            });
+            return res.status(403).json({ success: false, error: 'Compte non vérifié' });
         }
-        // Vérifier si le compte est actif
         if (!user.isActive) {
-            return res.status(403).json({
-                success: false,
-                error: 'Compte suspendu',
-            });
+            return res.status(403).json({ success: false, error: 'Compte suspendu' });
         }
-        // Générer les tokens JWT
-        const jwtOptions = { expiresIn: config_1.config.jwt.expiresIn };
+        // FIX #4 : expiresIn castés via le helper en haut de fichier
+        const jwtOptions = { expiresIn: accessExpiresIn };
         const accessToken = jsonwebtoken_1.default.sign({ userId: user.id, email: user.email, role: user.role }, config_1.config.jwt.secret, jwtOptions);
-        const refreshJwtOptions = { expiresIn: config_1.config.jwt.refreshExpiresIn };
+        const refreshJwtOptions = { expiresIn: refreshExpiresIn };
         const refreshToken = jsonwebtoken_1.default.sign({ userId: user.id, email: user.email, role: user.role }, config_1.config.jwt.secret, refreshJwtOptions);
-        // Stocker le refresh token hashé dans la base
         const refreshTokenHash = await bcryptjs_1.default.hash(refreshToken, 12);
         await refresh_token_service_1.RefreshTokenService.create({
             userId: user.id,
             tokenHash: refreshTokenHash,
             deviceId: deviceId || null,
-            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 jours
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         });
         return res.json({
             success: true,
@@ -167,17 +155,13 @@ router.post('/login', (0, index_1.validateRequest)(validators_1.loginSchema), as
 });
 /**
  * POST /auth/logout
- * Déconnexion
  */
 router.post('/logout', auth_1.authenticate, async (req, res) => {
     try {
         if (req.user?.id) {
             await refresh_token_service_1.RefreshTokenService.revokeUserTokens(req.user.id);
         }
-        return res.json({
-            success: true,
-            message: 'Déconnexion réussie',
-        });
+        return res.json({ success: true, message: 'Déconnexion réussie' });
     }
     catch (error) {
         console.error('Erreur logout:', error);
@@ -194,38 +178,24 @@ router.post('/logout', auth_1.authenticate, async (req, res) => {
 router.post('/refresh', (0, index_1.validateRequest)(validators_1.refreshTokenSchema), async (req, res) => {
     try {
         const { refreshToken } = req.body;
-        // Vérifier le refresh token
         const decoded = jsonwebtoken_1.default.verify(refreshToken, config_1.config.jwt.secret);
-        // Vérifier si le token existe en base
         const storedToken = await refresh_token_service_1.RefreshTokenService.findByUserId(decoded.userId);
         if (!storedToken || storedToken.length === 0) {
-            return res.status(401).json({
-                success: false,
-                error: 'Refresh token invalide ou révoqué',
-            });
+            return res.status(401).json({ success: false, error: 'Refresh token invalide ou révoqué' });
         }
-        // Vérifier si le token est valide (comparer le hash)
-        const isValid = await bcryptjs_1.default.compare(refreshToken, storedToken[0].token);
+        // FIX #5 : le champ s'appelle `tokenHash` dans RefreshToken, pas `token`
+        const isValid = await bcryptjs_1.default.compare(refreshToken, storedToken[0].tokenHash);
         if (!isValid) {
-            return res.status(401).json({
-                success: false,
-                error: 'Refresh token invalide',
-            });
+            return res.status(401).json({ success: false, error: 'Refresh token invalide' });
         }
-        // Vérifier si le token est expiré
         if (new Date() > storedToken[0].expiresAt) {
             await refresh_token_service_1.RefreshTokenService.delete(storedToken[0].id);
-            return res.status(401).json({
-                success: false,
-                error: 'Refresh token expiré',
-            });
+            return res.status(401).json({ success: false, error: 'Refresh token expiré' });
         }
-        // Révoquer l'ancien token (rotation)
         await refresh_token_service_1.RefreshTokenService.delete(storedToken[0].id);
-        // Générer de nouveaux tokens
-        const newAccessToken = jsonwebtoken_1.default.sign({ userId: decoded.userId, email: decoded.email, role: decoded.role }, config_1.config.jwt.secret, { expiresIn: config_1.config.jwt.expiresIn });
-        const newRefreshToken = jsonwebtoken_1.default.sign({ userId: decoded.userId, email: decoded.email, role: decoded.role }, config_1.config.jwt.secret, { expiresIn: config_1.config.jwt.refreshExpiresIn });
-        // Stocker le nouveau refresh token
+        // FIX #6 : utilisation des helpers castés pour expiresIn
+        const newAccessToken = jsonwebtoken_1.default.sign({ userId: decoded.userId, email: decoded.email, role: decoded.role }, config_1.config.jwt.secret, { expiresIn: accessExpiresIn });
+        const newRefreshToken = jsonwebtoken_1.default.sign({ userId: decoded.userId, email: decoded.email, role: decoded.role }, config_1.config.jwt.secret, { expiresIn: refreshExpiresIn });
         const newRefreshTokenHash = await bcryptjs_1.default.hash(newRefreshToken, 12);
         await refresh_token_service_1.RefreshTokenService.create({
             userId: decoded.userId,
@@ -243,28 +213,23 @@ router.post('/refresh', (0, index_1.validateRequest)(validators_1.refreshTokenSc
     }
     catch (error) {
         console.error('Erreur refresh:', error);
-        return res.status(401).json({
-            success: false,
-            error: 'Refresh token invalide ou expiré',
-        });
+        return res.status(401).json({ success: false, error: 'Refresh token invalide ou expiré' });
     }
 });
 /**
  * POST /auth/otp/envoyer
- * Envoyer un OTP SMS
  */
 router.post('/otp/envoyer', (0, index_1.validateRequest)(validators_1.otpRequestSchema), async (req, res) => {
     try {
         const { phone, purpose } = req.body;
-        // Générer le code OTP
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        // FIX #2 (bis) : le champ OTPInsert est `phone`, cohérent avec le reste du service
         await otp_service_1.OTPService.create({
             phone: phone,
             code: otpCode,
             purpose: purpose,
-            expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+            expiresAt: new Date(Date.now() + 10 * 60 * 1000),
         });
-        // TODO: Envoyer SMS via Twilio
         console.log(`OTP pour ${phone} (${purpose}): ${otpCode}`);
         return res.json({
             success: true,
@@ -282,31 +247,22 @@ router.post('/otp/envoyer', (0, index_1.validateRequest)(validators_1.otpRequest
 });
 /**
  * POST /auth/otp/verifier
- * Vérifier un OTP
  */
 router.post('/otp/verifier', (0, index_1.validateRequest)(validators_1.otpVerifySchema), async (req, res) => {
     try {
         const { phone, otp } = req.body;
         const otpRecord = await otp_service_1.OTPService.findValidOTP(phone, otp);
         if (!otpRecord) {
-            return res.status(400).json({
-                success: false,
-                error: 'Code OTP invalide ou expiré',
-            });
+            return res.status(400).json({ success: false, error: 'Code OTP invalide ou expiré' });
         }
-        // OTP valide - marquer comme utilisé et supprimer
         await otp_service_1.OTPService.delete(otpRecord.id);
-        // Si c'est pour REGISTER, vérifier l'utilisateur et le marquer comme vérifié
-        if (otpRecord.purpose === client_1.OtpPurpose.REGISTER) {
+        if (otpRecord.purpose === 'REGISTER') {
             const user = await user_service_1.UserService.findByTelephone(phone);
             if (user) {
                 await user_service_1.UserService.update(user.id, { isVerified: true });
             }
         }
-        return res.json({
-            success: true,
-            message: 'Code OTP vérifié avec succès',
-        });
+        return res.json({ success: true, message: 'Code OTP vérifié avec succès' });
     }
     catch (error) {
         console.error('Erreur vérification OTP:', error);
@@ -318,17 +274,14 @@ router.post('/otp/verifier', (0, index_1.validateRequest)(validators_1.otpVerify
 });
 /**
  * POST /auth/password/reset
- * Demander une réinitialisation de mot de passe
  */
 router.post('/password/reset', (0, index_1.validateRequest)(validators_1.passwordResetRequestSchema), async (req, res) => {
     try {
         const { email } = req.body;
         const user = await user_service_1.UserService.findByEmail(email);
-        // Toujours retourner succès pour éviter le fishing
-        // TODO: Envoyer un email avec lien de reset si utilisateur existe
         if (user) {
             console.log(`Demande de reset pour: ${email}`);
-            // Générer un token et envoyer par email
+            // TODO: Générer un token signé et envoyer par email
         }
         return res.json({
             success: true,
@@ -345,18 +298,13 @@ router.post('/password/reset', (0, index_1.validateRequest)(validators_1.passwor
 });
 /**
  * POST /auth/password/reset/confirmer
- * Confirmer la réinitialisation de mot de passe
  */
 router.post('/password/reset/confirmer', (0, index_1.validateRequest)(validators_1.passwordResetConfirmSchema), async (req, res) => {
     try {
         const { token, newPassword } = req.body;
         // TODO: Vérifier le token et mettre à jour le mot de passe
-        // Pour l'instant, retour succès
         console.log('Reset password avec token:', token);
-        return res.json({
-            success: true,
-            message: 'Mot de passe réinitialisé avec succès',
-        });
+        return res.json({ success: true, message: 'Mot de passe réinitialisé avec succès' });
     }
     catch (error) {
         console.error('Erreur confirmation reset:', error);
@@ -368,16 +316,12 @@ router.post('/password/reset/confirmer', (0, index_1.validateRequest)(validators
 });
 /**
  * GET /auth/me
- * Récupérer les informations de l'utilisateur connecté
  */
 router.get('/me', auth_1.authenticate, async (req, res) => {
     try {
         const user = await user_service_1.UserService.findById(req.user.id);
         if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: 'Utilisateur non trouvé',
-            });
+            return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
         }
         return res.json({
             success: true,
@@ -403,30 +347,20 @@ router.get('/me', auth_1.authenticate, async (req, res) => {
 });
 /**
  * PATCH /auth/changer-password
- * Changer le mot de passe
  */
 router.patch('/changer-password', auth_1.authenticate, (0, index_1.validateRequest)(validators_1.changePasswordSchema), async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
         const user = await user_service_1.UserService.findById(req.user.id);
         if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: 'Utilisateur non trouvé',
-            });
+            return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
         }
-        // Vérifier le mot de passe actuel
         const isValidPassword = await bcryptjs_1.default.compare(currentPassword, user.password);
         if (!isValidPassword) {
-            return res.status(400).json({
-                success: false,
-                error: 'Mot de passe actuel incorrect',
-            });
+            return res.status(400).json({ success: false, error: 'Mot de passe actuel incorrect' });
         }
-        // Hasher le nouveau mot de passe
         const hashedNewPassword = await bcryptjs_1.default.hash(newPassword, 12);
         await user_service_1.UserService.update(user.id, { password: hashedNewPassword });
-        // Révoquer tous les refresh tokens pour sécurité
         await refresh_token_service_1.RefreshTokenService.revokeUserTokens(user.id);
         return res.json({
             success: true,

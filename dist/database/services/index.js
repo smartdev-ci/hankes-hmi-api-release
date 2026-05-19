@@ -4,7 +4,7 @@
  * Utilisant PostgreSQL natif via Prisma ORM
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RapportService = exports.NotificationService = exports.RefreshTokenService = exports.OTPService = exports.DeviceService = exports.DiffusionService = exports.MusicRecognitionService = exports.AudioCaptureService = exports.EtablissementService = exports.UserService = exports.disconnectDatabase = exports.connectDatabase = exports.prisma = void 0;
+exports.SupabasePrismaService = exports.ArtisteProfileService = exports.RecenseurProfileService = exports.RapportService = exports.NotificationService = exports.RefreshTokenService = exports.OTPService = exports.DeviceService = exports.DiffusionService = exports.MusicRecognitionService = exports.AudioCaptureService = exports.EtablissementService = exports.UserService = exports.disconnectDatabase = exports.connectDatabase = exports.prisma = void 0;
 // Export du client Prisma et des utilitaires de connexion
 var index_1 = require("../index");
 Object.defineProperty(exports, "prisma", { enumerable: true, get: function () { return index_1.prisma; } });
@@ -31,4 +31,10 @@ var notification_service_1 = require("./notification.service");
 Object.defineProperty(exports, "NotificationService", { enumerable: true, get: function () { return notification_service_1.NotificationService; } });
 var rapport_service_1 = require("./rapport.service");
 Object.defineProperty(exports, "RapportService", { enumerable: true, get: function () { return rapport_service_1.RapportService; } });
+var recenseur_profile_service_1 = require("./recenseur-profile.service");
+Object.defineProperty(exports, "RecenseurProfileService", { enumerable: true, get: function () { return recenseur_profile_service_1.RecenseurProfileService; } });
+var artiste_profile_service_1 = require("./artiste-profile.service");
+Object.defineProperty(exports, "ArtisteProfileService", { enumerable: true, get: function () { return artiste_profile_service_1.ArtisteProfileService; } });
+var supabase_prisma_service_1 = require("./supabase-prisma.service");
+Object.defineProperty(exports, "SupabasePrismaService", { enumerable: true, get: function () { return supabase_prisma_service_1.SupabasePrismaService; } });
 //# sourceMappingURL=index.js.map

@@ -5,7 +5,7 @@
 
 import { prisma } from '../index';
 import { DatabaseError, NotFoundError, ValidationError } from '../errors';
-import { UserRole } from '@prisma/client';
+import { UserRole } from '../../types';
 
 interface User {
   id: string;

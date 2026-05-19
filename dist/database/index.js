@@ -23,11 +23,15 @@ exports.prisma = global.prisma || new client_1.PrismaClient({
     log: process.env.NODE_ENV === 'development'
         ? ['query', 'error', 'warn']
         : ['error'],
-    datasources: {
-        db: {
-            url: process.env.DATABASE_URL,
-        },
-    },
+    ...(process.env.DATABASE_URL
+        ? {
+            datasources: {
+                db: {
+                    url: process.env.DATABASE_URL,
+                },
+            },
+        }
+        : {}),
 });
 // Sauvegarder dans le global en développement
 if (process.env.NODE_ENV !== 'production') {

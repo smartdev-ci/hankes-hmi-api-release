@@ -10,12 +10,14 @@ import devicesRoutes from './devices';
 import notificationsRoutes from './notifications';
 import audioRoutes from './audio';
 import uploadRoutes from './upload';
+import artistesRoutes from './artistes';
 
 const router = Router();
 
 // Routes publiques
 router.use('/auth', authRoutes);
 router.use('/health', healthRoutes);
+router.use('/artistes', artistesRoutes);
 
 // Routes protégées
 router.use('/etablissements', etablissementsRoutes);

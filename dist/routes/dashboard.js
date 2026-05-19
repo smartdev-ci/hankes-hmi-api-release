@@ -2,170 +2,101 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const auth_1 = require("../middleware/auth");
+const services_1 = require("../database/services");
 const router = (0, express_1.Router)();
-/**
- * GET /dashboard/kpis
- * Récupérer les KPIs principaux (admin uniquement)
- */
+const parseDateRange = (query) => ({
+    startDate: query.startDate ? new Date(query.startDate) : undefined,
+    endDate: query.endDate ? new Date(query.endDate) : undefined,
+});
 router.get('/kpis', auth_1.authenticate, (0, auth_1.authorize)('admin'), async (req, res) => {
     try {
-        const startDate = req.query.startDate;
-        const endDate = req.query.endDate;
-        // KPIs mockés
-        const kpis = {
-            totalEtablissements: 0,
-            totalDiffusions: 0,
-            musiquesUnique: 0,
-            artistesUnique: 0,
-            couvertureGeographique: {
-                villes: 0,
-                regions: 0,
-            },
-            periode: {
-                startDate: startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-                endDate: endDate || new Date().toISOString(),
-            },
-        };
+        const range = parseDateRange(req.query);
+        const kpis = await services_1.SupabasePrismaService.getDashboardKpis(range);
         res.json({
             success: true,
-            data: kpis,
+            data: {
+                ...kpis,
+                periode: {
+                    startDate: range.startDate?.toISOString() || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                    endDate: range.endDate?.toISOString() || new Date().toISOString(),
+                },
+            },
         });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error.message,
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 });
-/**
- * GET /dashboard/carte
- * Données pour la carte géographique (avec filtres)
- */
 router.get('/carte', auth_1.authenticate, async (req, res) => {
     try {
-        const statut = req.query.statut;
-        const ville = req.query.ville;
-        // Mock: données géographiques avec filtres
-        let etablissementsData = [];
-        // Application des filtres (mock)
-        if (statut || ville) {
-            // Filtres appliqués ici quand on aura la vraie DB
-            etablissementsData = [];
-        }
-        else {
-            etablissementsData = [];
-        }
-        const mapData = {
-            etablissements: etablissementsData,
-            total: etablissementsData.length,
-        };
-        res.json({
-            success: true,
-            data: mapData,
+        const data = await services_1.SupabasePrismaService.getMapData({
+            statut: req.query.statut,
+            ville: req.query.ville,
         });
+        res.json({ success: true, data });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error.message,
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 });
-/**
- * GET /dashboard/top-musiques
- * Top des musiques les plus diffusées (avec filtres date et limit)
- */
 router.get('/top-musiques', auth_1.authenticate, async (req, res) => {
     try {
-        const limit = parseInt(req.query.limit) || 10;
-        const startDate = req.query.startDate;
-        const endDate = req.query.endDate;
-        // Validation du limit (5-50)
-        const validLimit = Math.min(Math.max(limit, 5), 50);
-        // Mock: top musiques
-        const topMusiques = [];
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 5), 50);
+        const range = parseDateRange(req.query);
+        const classement = await services_1.SupabasePrismaService.getTopMusiques(limit, range);
         res.json({
             success: true,
             data: {
-                classement: topMusiques,
+                classement,
                 periode: {
-                    startDate: startDate || null,
-                    endDate: endDate || null
+                    startDate: range.startDate?.toISOString() || null,
+                    endDate: range.endDate?.toISOString() || null,
                 },
             },
         });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error.message,
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 });
-/**
- * GET /dashboard/top-artistes
- * Top des artistes les plus diffusés (avec filtres date et limit)
- */
 router.get('/top-artistes', auth_1.authenticate, async (req, res) => {
     try {
-        const limit = parseInt(req.query.limit) || 10;
-        const startDate = req.query.startDate;
-        const endDate = req.query.endDate;
-        // Validation du limit (5-50)
-        const validLimit = Math.min(Math.max(limit, 5), 50);
-        // Mock: top artistes
-        const topArtistes = [];
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 5), 50);
+        const range = parseDateRange(req.query);
+        const classement = await services_1.SupabasePrismaService.getTopArtistes(limit, range);
         res.json({
             success: true,
             data: {
-                classement: topArtistes,
+                classement,
                 periode: {
-                    startDate: startDate || null,
-                    endDate: endDate || null
+                    startDate: range.startDate?.toISOString() || null,
+                    endDate: range.endDate?.toISOString() || null,
                 },
             },
         });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error.message,
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 });
-/**
- * GET /dashboard/evolution
- * Évolution temporelle des diffusions (avec filtres date et granularité)
- */
 router.get('/evolution', auth_1.authenticate, async (req, res) => {
     try {
-        const startDate = req.query.startDate;
-        const endDate = req.query.endDate;
-        const granularite = req.query.granularite || 'jour';
-        // Validation de la granularité
-        const validGranularite = ['jour', 'semaine', 'mois'].includes(granularite)
-            ? granularite
-            : 'jour';
-        // Mock: évolution
-        const evolution = {
-            evolution: [],
-            periode: {
-                startDate: startDate || null,
-                endDate: endDate || null,
-                granularite: validGranularite,
-            },
-        };
+        const range = parseDateRange(req.query);
+        const evolution = await services_1.SupabasePrismaService.getDiffusionEvolution(range);
         res.json({
             success: true,
-            data: evolution,
+            data: {
+                evolution,
+                periode: {
+                    startDate: range.startDate?.toISOString() || null,
+                    endDate: range.endDate?.toISOString() || null,
+                    granularite: 'jour',
+                },
+            },
         });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error.message,
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 exports.default = router;

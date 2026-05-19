@@ -33,6 +33,20 @@ class NotificationService {
             throw new errors_1.DatabaseError(`Erreur lors de la récupération de la notification ${id}`);
         }
     }
+    static async findByUser(userId) {
+        try {
+            const data = await index_1.prisma.notification.findMany({
+                where: { userId },
+                orderBy: { createdAt: 'desc' },
+            });
+            return data;
+        }
+        catch (error) {
+            if (error instanceof errors_1.DatabaseError)
+                throw error;
+            throw new errors_1.DatabaseError(`Erreur lors de la rÃ©cupÃ©ration des notifications de l'utilisateur ${userId}`);
+        }
+    }
     static async create(data) {
         try {
             const result = await index_1.prisma.notification.create({
@@ -64,6 +78,26 @@ class NotificationService {
             if (error instanceof errors_1.DatabaseError || error instanceof errors_1.NotFoundError)
                 throw error;
             throw new errors_1.DatabaseError('Erreur lors de la marque comme lue');
+        }
+    }
+    static async markAllAsRead(userId) {
+        try {
+            const result = await index_1.prisma.notification.updateMany({
+                where: {
+                    userId,
+                    estLue: false,
+                },
+                data: {
+                    estLue: true,
+                    dateLecture: new Date(),
+                },
+            });
+            return result.count;
+        }
+        catch (error) {
+            if (error instanceof errors_1.DatabaseError)
+                throw error;
+            throw new errors_1.DatabaseError('Erreur lors de la marque globale comme lue');
         }
     }
     static async delete(id) {

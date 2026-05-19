@@ -1,12 +1,8 @@
 import { Router } from 'express';
-import { authenticate, authorize } from '../middleware/auth';
+import { SupabasePrismaService } from '../database/services';
 
 const router = Router();
 
-/**
- * GET /v1/health
- * Santé de l'API
- */
 router.get('/', async (req, res) => {
   res.json({
     success: true,
@@ -19,21 +15,15 @@ router.get('/', async (req, res) => {
   });
 });
 
-/**
- * GET /v1/health/database
- * Vérification de la connexion à la base de données
- */
 router.get('/database', async (req, res) => {
   try {
-    // TODO: Vérifier la connexion à PostgreSQL avec Prisma
-    const connected = true; // Mock pour l'instant
-    
+    const check = await SupabasePrismaService.checkConnection();
+
     res.json({
       success: true,
       data: {
-        connected,
-        database: 'postgresql',
-        status: connected ? 'connected' : 'disconnected',
+        ...check,
+        status: check.connected ? 'connected' : 'disconnected',
       },
     });
   } catch (error: any) {
@@ -45,20 +35,15 @@ router.get('/database', async (req, res) => {
   }
 });
 
-/**
- * GET /v1/health/ready
- * Vérification de readiness (dépendances prêtes)
- */
 router.get('/ready', async (req, res) => {
   try {
-    // TODO: Vérifier la connexion à PostgreSQL et Redis
-    
+    const database = await SupabasePrismaService.checkConnection();
+
     res.json({
       success: true,
       status: 'ready',
       checks: {
-        database: 'ok',
-        redis: 'ok',
+        database: database.connected ? 'ok' : 'failed',
       },
     });
   } catch (error: any) {
@@ -70,29 +55,11 @@ router.get('/ready', async (req, res) => {
   }
 });
 
-/**
- * GET /v1/metrics
- * Métriques Prometheus
- */
 router.get('/metrics', async (req, res) => {
-  // Format Prometheus
   const metrics = `
-# HELP hmis_api_requests_total Total number of API requests
-# TYPE hmis_api_requests_total counter
-hmis_api_requests_total 0
-
-# HELP hmis_api_request_duration_seconds Request duration in seconds
-# TYPE hmis_api_request_duration_seconds histogram
-hmis_api_request_duration_seconds_bucket{le="0.1"} 0
-hmis_api_request_duration_seconds_bucket{le="0.5"} 0
-hmis_api_request_duration_seconds_bucket{le="1"} 0
-hmis_api_request_duration_seconds_bucket{le="+Inf"} 0
-hmis_api_request_duration_seconds_sum 0
-hmis_api_request_duration_seconds_count 0
-
-# HELP hmis_api_active_connections Number of active connections
-# TYPE hmis_api_active_connections gauge
-hmis_api_active_connections 0
+# HELP hmis_api_process_uptime_seconds Process uptime in seconds
+# TYPE hmis_api_process_uptime_seconds gauge
+hmis_api_process_uptime_seconds ${Math.floor(process.uptime())}
 `;
 
   res.set('Content-Type', 'text/plain');

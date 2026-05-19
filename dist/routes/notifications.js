@@ -2,98 +2,59 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const auth_1 = require("../middleware/auth");
+const services_1 = require("../database/services");
 const router = (0, express_1.Router)();
-// Mock database
-const notifications = [];
-/**
- * GET /notifications
- * Lister les notifications de l'utilisateur connecté
- */
+const getParam = (value) => Array.isArray(value) ? value[0] : value;
 router.get('/', auth_1.authenticate, async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 20;
+        const limit = Math.min(parseInt(req.query.limit) || 20, 100);
         const nonLues = req.query.nonLues === 'true';
-        // Filtrer les notifications de l'utilisateur
-        let filtered = notifications.filter(n => n.userId === req.user?.id);
+        let notifications = await services_1.NotificationService.findByUser(req.user.id);
         if (nonLues) {
-            filtered = filtered.filter(n => !n.estLue);
+            notifications = notifications.filter((notification) => !notification.estLue);
         }
-        // Pagination
         const startIndex = (page - 1) * limit;
-        const endIndex = startIndex + limit;
-        const paginatedResults = filtered.slice(startIndex, endIndex);
         res.json({
             success: true,
-            data: paginatedResults,
+            data: notifications.slice(startIndex, startIndex + limit),
             pagination: {
                 page,
                 limit,
-                total: filtered.length,
-                totalPages: Math.ceil(filtered.length / limit),
+                total: notifications.length,
+                totalPages: Math.ceil(notifications.length / limit),
             },
         });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error.message,
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 });
-/**
- * POST /notifications/:id/lire
- * Marquer une notification comme lue
- */
-router.post('/:id/lire', auth_1.authenticate, async (req, res) => {
-    try {
-        const { id } = req.params;
-        const notification = notifications.find(n => n.id === id && n.userId === req.user?.id);
-        if (!notification) {
-            res.status(404).json({
-                success: false,
-                error: 'Notification non trouvée',
-            });
-            return;
-        }
-        notification.estLue = true;
-        notification.dateLecture = new Date();
-        res.json({
-            success: true,
-            message: 'Notification marquée comme lue',
-        });
-    }
-    catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error.message,
-        });
-    }
-});
-/**
- * POST /notifications/lire-tout
- * Marquer toutes les notifications comme lues
- */
 router.post('/lire-tout', auth_1.authenticate, async (req, res) => {
     try {
-        const now = new Date();
-        // Marquer toutes les notifications de l'utilisateur comme lues
-        notifications
-            .filter(n => n.userId === req.user?.id && !n.estLue)
-            .forEach(n => {
-            n.estLue = true;
-            n.dateLecture = now;
-        });
+        const count = await services_1.NotificationService.markAllAsRead(req.user.id);
         res.json({
             success: true,
-            message: 'Toutes les notifications ont été marquées comme lues',
+            message: 'Toutes les notifications ont ete marquees comme lues',
+            count,
         });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error.message,
-        });
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+router.post('/:id/lire', auth_1.authenticate, async (req, res) => {
+    try {
+        const id = getParam(req.params.id);
+        const notification = await services_1.NotificationService.findById(id);
+        if (!notification || notification.userId !== req.user.id) {
+            return res.status(404).json({ success: false, error: 'Notification non trouvee' });
+        }
+        await services_1.NotificationService.markAsRead(id);
+        return res.json({ success: true, message: 'Notification marquee comme lue' });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
     }
 });
 exports.default = router;

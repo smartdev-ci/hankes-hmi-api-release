@@ -2,11 +2,12 @@ import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
 import { validateRequest } from '../middleware';
 import { createEtablissementSchema, updateEtablissementSchema } from '../utils/validators';
+import { EtablissementService } from '../database/services/etablissement.service';
+import { NotFoundError, ValidationError } from '../database/errors';
+import { EtablissementType } from '@prisma/client';
+import { prisma } from '../database';
 
 const router = Router();
-
-// Mock database
-const etablissements: any[] = [];
 
 /**
  * GET /etablissements
@@ -15,46 +16,77 @@ const etablissements: any[] = [];
 router.get('/', authenticate, async (req, res) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
-    const ville = req.query.ville as string;
-    const type = req.query.type as string;
-    const search = req.query.search as string;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100); // Max 100 par page
+    const ville = req.query.ville as string | undefined;
+    const type = req.query.type as EtablissementType | undefined;
+    const search = req.query.search as string | undefined;
+    const region = req.query.region as string | undefined;
 
-    let filtered = [...etablissements];
+    // Construction des filtres Prisma
+    const where: any = {};
 
-    // Filtres
     if (ville) {
-      filtered = filtered.filter(e => e.ville === ville);
-    }
-    if (type) {
-      filtered = filtered.filter(e => e.type === type);
-    }
-    if (search) {
-      filtered = filtered.filter(e => 
-        e.nom.toLowerCase().includes(search.toLowerCase()) ||
-        e.adresse.toLowerCase().includes(search.toLowerCase())
-      );
+      where.ville = ville;
     }
 
-    // Pagination
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    const paginatedResults = filtered.slice(startIndex, endIndex);
+    if (region) {
+      where.region = region;
+    }
+
+    if (type) {
+      where.type = type;
+    }
+
+    if (search) {
+      where.OR = [
+        { nom: { contains: search, mode: 'insensitive' } },
+        { adresse: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+        { telephone: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    // Récupération du total pour la pagination
+    const total = await prisma.etablissement.count({ where });
+
+    // Pagination Prisma native
+    const skip = (page - 1) * limit;
+    const etablissements = await prisma.etablissement.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { nom: 'asc' },
+      include: {
+        gerant: {
+          select: {
+            id: true,
+            nom: true,
+            telephone: true,
+            email: true,
+          },
+        },
+      },
+    });
 
     res.json({
       success: true,
-      data: paginatedResults,
+      data: etablissements,
       pagination: {
         page,
         limit,
-        total: filtered.length,
-        totalPages: Math.ceil(filtered.length / limit),
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasPreviousPage: page > 1,
+        hasNextPage: page < Math.ceil(total / limit),
       },
     });
   } catch (error: any) {
+    console.error('Erreur lors de la récupération des établissements:', error);
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Erreur serveur interne' 
+        : error.message,
     });
   }
 });
@@ -65,20 +97,29 @@ router.get('/', authenticate, async (req, res) => {
  */
 router.post('/', authenticate, validateRequest(createEtablissementSchema), async (req, res) => {
   try {
-    const etablissement = {
-      id: require('uuid').v4(),
+    const etablissementData = {
       ...req.body,
       gerantId: req.user?.id,
       isActive: true,
       isVerified: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
     };
 
-    etablissements.push(etablissement);
+    // Vérifier que le gérant existe et n'a pas déjà un établissement
+    const existingEtablissement = await prisma.etablissement.findUnique({
+      where: { gerantId: req.user?.id },
+    });
+
+    if (existingEtablissement) {
+      throw new ValidationError('Un établissement est déjà associé à votre compte');
+    }
+
+    const etablissement = await EtablissementService.create(etablissementData);
 
     // Mettre à jour l'utilisateur avec l'ID de l'établissement
-    // (dans une vraie implémentation, mettre à jour la BDD)
+    await prisma.user.update({
+      where: { id: req.user?.id },
+      data: { etablissementId: etablissement.id },
+    });
 
     res.status(201).json({
       success: true,
@@ -86,9 +127,20 @@ router.post('/', authenticate, validateRequest(createEtablissementSchema), async
       message: 'Établissement créé avec succès',
     });
   } catch (error: any) {
+    console.error('Erreur lors de la création de l\'établissement:', error);
+    
+    if (error instanceof ValidationError || error instanceof NotFoundError) {
+      return res.status(400).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Erreur serveur interne' 
+        : error.message,
     });
   }
 });
@@ -101,23 +153,22 @@ router.get('/:etablissementId', authenticate, async (req, res) => {
   try {
     const { etablissementId } = req.params;
     
-    const etablissement = etablissements.find(e => e.id === etablissementId);
+    if (!etablissementId || Array.isArray(etablissementId)) {
+      throw new ValidationError('ID de l\'établissement invalide');
+    }
+
+    const etablissement = await EtablissementService.findById(etablissementId);
     
     if (!etablissement) {
-      res.status(404).json({
-        success: false,
-        error: 'Établissement non trouvé',
-      });
-      return;
+      throw new NotFoundError('Établissement non trouvé');
     }
 
     // Vérifier les permissions
     if (req.user?.role !== 'admin' && etablissement.gerantId !== req.user?.id) {
-      res.status(403).json({
+      return res.status(403).json({
         success: false,
         error: 'Accès non autorisé',
       });
-      return;
     }
 
     res.json({
@@ -125,9 +176,20 @@ router.get('/:etablissementId', authenticate, async (req, res) => {
       data: etablissement,
     });
   } catch (error: any) {
+    console.error('Erreur lors de la récupération de l\'établissement:', error);
+    
+    if (error instanceof NotFoundError) {
+      return res.status(404).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Erreur serveur interne' 
+        : error.message,
     });
   }
 });
@@ -140,40 +202,47 @@ router.put('/:etablissementId', authenticate, validateRequest(updateEtablissemen
   try {
     const { etablissementId } = req.params;
     
-    const etablissement = etablissements.find(e => e.id === etablissementId);
+    if (!etablissementId || Array.isArray(etablissementId)) {
+      throw new ValidationError('ID de l\'établissement invalide');
+    }
+
+    const etablissement = await EtablissementService.findById(etablissementId);
     
     if (!etablissement) {
-      res.status(404).json({
-        success: false,
-        error: 'Établissement non trouvé',
-      });
-      return;
+      throw new NotFoundError('Établissement non trouvé');
     }
 
     // Vérifier les permissions
     if (req.user?.role !== 'admin' && etablissement.gerantId !== req.user?.id) {
-      res.status(403).json({
+      return res.status(403).json({
         success: false,
         error: 'Accès non autorisé',
       });
-      return;
     }
 
-    // Mise à jour
-    Object.assign(etablissement, {
-      ...req.body,
-      updatedAt: new Date(),
-    });
+    // Mise à jour via le service
+    const updatedEtablissement = await EtablissementService.update(etablissementId, req.body);
 
     res.json({
       success: true,
-      data: etablissement,
+      data: updatedEtablissement,
       message: 'Établissement mis à jour avec succès',
     });
   } catch (error: any) {
+    console.error('Erreur lors de la mise à jour de l\'établissement:', error);
+    
+    if (error instanceof NotFoundError || error instanceof ValidationError) {
+      return res.status(400).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Erreur serveur interne' 
+        : error.message,
     });
   }
 });
@@ -186,26 +255,39 @@ router.delete('/:etablissementId', authenticate, authorize('admin'), async (req,
   try {
     const { etablissementId } = req.params;
     
-    const index = etablissements.findIndex(e => e.id === etablissementId);
-    
-    if (index === -1) {
-      res.status(404).json({
-        success: false,
-        error: 'Établissement non trouvé',
-      });
-      return;
+    if (!etablissementId || Array.isArray(etablissementId)) {
+      throw new ValidationError('ID de l\'établissement invalide');
     }
 
-    etablissements.splice(index, 1);
+    // Vérifier que l'établissement existe
+    const etablissement = await EtablissementService.findById(etablissementId);
+    
+    if (!etablissement) {
+      throw new NotFoundError('Établissement non trouvé');
+    }
+
+    // Suppression via le service
+    await EtablissementService.delete(etablissementId);
 
     res.json({
       success: true,
       message: 'Établissement supprimé avec succès',
     });
   } catch (error: any) {
+    console.error('Erreur lors de la suppression de l\'établissement:', error);
+    
+    if (error instanceof NotFoundError) {
+      return res.status(404).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Erreur serveur interne' 
+        : error.message,
     });
   }
 });
@@ -218,28 +300,38 @@ router.post('/:etablissementId/valider', authenticate, authorize('admin'), async
   try {
     const { etablissementId } = req.params;
     
-    const etablissement = etablissements.find(e => e.id === etablissementId);
-    
-    if (!etablissement) {
-      res.status(404).json({
-        success: false,
-        error: 'Établissement non trouvé',
-      });
-      return;
+    if (!etablissementId || Array.isArray(etablissementId)) {
+      throw new ValidationError('ID de l\'établissement invalide');
     }
 
-    etablissement.isVerified = true;
-    etablissement.updatedAt = new Date();
+    const etablissement = await EtablissementService.findById(etablissementId);
+    
+    if (!etablissement) {
+      throw new NotFoundError('Établissement non trouvé');
+    }
+
+    const updatedEtablissement = await EtablissementService.verifyEtablissement(etablissementId);
 
     res.json({
       success: true,
-      data: etablissement,
+      data: updatedEtablissement,
       message: 'Établissement validé avec succès',
     });
   } catch (error: any) {
+    console.error('Erreur lors de la validation de l\'établissement:', error);
+    
+    if (error instanceof NotFoundError) {
+      return res.status(404).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Erreur serveur interne' 
+        : error.message,
     });
   }
 });
@@ -251,32 +343,50 @@ router.post('/:etablissementId/valider', authenticate, authorize('admin'), async
 router.post('/:etablissementId/suspendre', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { etablissementId } = req.params;
-    const { motif } = req.body;
     
-    const etablissement = etablissements.find(e => e.id === etablissementId);
-    
-    if (!etablissement) {
-      res.status(404).json({
-        success: false,
-        error: 'Établissement non trouvé',
-      });
-      return;
+    if (!etablissementId || Array.isArray(etablissementId)) {
+      throw new ValidationError('ID de l\'établissement invalide');
     }
 
-    etablissement.isActive = false;
-    etablissement.updatedAt = new Date();
+    const { motif } = req.body;
+    
+    const etablissement = await EtablissementService.findById(etablissementId);
+    
+    if (!etablissement) {
+      throw new NotFoundError('Établissement non trouvé');
+    }
 
-    // TODO: Envoyer notification au gérant
+    // Suspension de l'établissement
+    const updatedEtablissement = await EtablissementService.toggleActiveStatus(etablissementId, false);
+
+    // TODO: Envoyer notification au gérant avec le motif
+    // await NotificationService.create({
+    //   userId: etablissement.gerantId,
+    //   titre: 'Établissement suspendu',
+    //   message: `Votre établissement a été suspendu. Motif: ${motif}`,
+    //   type: 'ALERT',
+    // });
 
     res.json({
       success: true,
-      data: etablissement,
+      data: updatedEtablissement,
       message: 'Établissement suspendu avec succès',
     });
   } catch (error: any) {
+    console.error('Erreur lors de la suspension de l\'établissement:', error);
+    
+    if (error instanceof NotFoundError) {
+      return res.status(404).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Erreur serveur interne' 
+        : error.message,
     });
   }
 });
@@ -288,39 +398,114 @@ router.post('/:etablissementId/suspendre', authenticate, authorize('admin'), asy
 router.get('/:etablissementId/stats', authenticate, async (req, res) => {
   try {
     const { etablissementId } = req.params;
-    const startDate = req.query.startDate as string;
-    const endDate = req.query.endDate as string;
     
-    const etablissement = etablissements.find(e => e.id === etablissementId);
+    if (!etablissementId || Array.isArray(etablissementId)) {
+      throw new ValidationError('ID de l\'établissement invalide');
+    }
+
+    const startDate = req.query.startDate as string | undefined;
+    const endDate = req.query.endDate as string | undefined;
+    
+    const etablissement = await EtablissementService.findById(etablissementId);
     
     if (!etablissement) {
-      res.status(404).json({
-        success: false,
-        error: 'Établissement non trouvé',
-      });
-      return;
+      throw new NotFoundError('Établissement non trouvé');
     }
 
     // Vérifier les permissions
     if (req.user?.role !== 'admin' && etablissement.gerantId !== req.user?.id) {
-      res.status(403).json({
+      return res.status(403).json({
         success: false,
         error: 'Accès non autorisé',
       });
-      return;
     }
 
-    // Stats mockées
+    // Construire les filtres de date pour les diffusions
+    const whereFilters: any = { etablissementId };
+    
+    if (startDate || endDate) {
+      whereFilters.playedAt = {};
+      if (startDate) {
+        whereFilters.playedAt.gte = new Date(startDate);
+      }
+      if (endDate) {
+        whereFilters.playedAt.lte = new Date(endDate);
+      }
+    }
+
+    // Récupérer les statistiques depuis la table Diffusion
+    const [totalDiffusions, musiquesUnique, artistesUnique] = await Promise.all([
+      prisma.diffusion.count({ where: whereFilters }),
+      
+      // Musiques uniques
+      prisma.diffusion.groupBy({
+        by: ['musicId'],
+        where: whereFilters,
+      }).then(results => results.length),
+      
+      // Artistes uniques
+      prisma.diffusion.groupBy({
+        by: ['artiste'],
+        where: whereFilters,
+      }).then(results => results.length),
+    ]);
+
+    // Durée totale (en heures)
+    const dureeTotaleResult = await prisma.diffusion.aggregate({
+      where: whereFilters,
+      _sum: { duree: true },
+    });
+    const dureeTotaleHeures = Math.round((dureeTotaleResult._sum.duree || 0) / 3600);
+
+    // Top musiques
+    const topMusiques = await prisma.diffusion.groupBy({
+      by: ['titre', 'artiste'],
+      where: whereFilters,
+      _count: { id: true },
+      orderBy: { _count: { id: 'desc' } },
+      take: 10,
+    });
+
+    // Top artistes
+    const topArtistes = await prisma.diffusion.groupBy({
+      by: ['artiste'],
+      where: whereFilters,
+      _count: { id: true },
+      orderBy: { _count: { id: 'desc' } },
+      take: 10,
+    });
+
+    // Évolution par jour (7 derniers jours si pas de dates spécifiées)
+    const evolutionParJour = await prisma.diffusion.groupBy({
+      by: ['playedAt'],
+      where: whereFilters,
+      _count: { id: true },
+      orderBy: { playedAt: 'asc' },
+    });
+
+    // Formater l'évolution par jour
+    const evolutionFormatee = evolutionParJour.map(item => ({
+      date: item.playedAt.toISOString().split('T')[0],
+      count: item._count.id,
+    }));
+
     const stats = {
       etablissementId,
       periode: { startDate, endDate },
-      totalDiffusions: 0,
-      musiquesUnique: 0,
-      artistesUnique: 0,
-      dureeTotaleHeures: 0,
-      topMusiques: [],
-      topArtistes: [],
-      evolutionParJour: [],
+      totalDiffusions,
+      musiquesUnique,
+      artistesUnique,
+      dureeTotaleHeures,
+      topMusiques: topMusiques.map(m => ({
+        titre: m.titre,
+        artiste: m.artiste,
+        nombreDiffusions: m._count.id,
+      })),
+      topArtistes: topArtistes.map(a => ({
+        artiste: a.artiste,
+        nombreDiffusions: a._count.id,
+      })),
+      evolutionParJour: evolutionFormatee,
     };
 
     res.json({
@@ -328,9 +513,20 @@ router.get('/:etablissementId/stats', authenticate, async (req, res) => {
       data: stats,
     });
   } catch (error: any) {
+    console.error('Erreur lors de la récupération des statistiques:', error);
+    
+    if (error instanceof NotFoundError) {
+      return res.status(404).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Erreur serveur interne' 
+        : error.message,
     });
   }
 });
@@ -342,43 +538,86 @@ router.get('/:etablissementId/stats', authenticate, async (req, res) => {
 router.get('/:etablissementId/diffusions', authenticate, async (req, res) => {
   try {
     const { etablissementId } = req.params;
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
     
-    const etablissement = etablissements.find(e => e.id === etablissementId);
+    if (!etablissementId || Array.isArray(etablissementId)) {
+      throw new ValidationError('ID de l\'établissement invalide');
+    }
+
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100); // Max 100 par page
+    
+    const etablissement = await EtablissementService.findById(etablissementId);
     
     if (!etablissement) {
-      res.status(404).json({
-        success: false,
-        error: 'Établissement non trouvé',
-      });
-      return;
+      throw new NotFoundError('Établissement non trouvé');
     }
 
     // Vérifier les permissions
     if (req.user?.role !== 'admin' && etablissement.gerantId !== req.user?.id) {
-      res.status(403).json({
+      return res.status(403).json({
         success: false,
         error: 'Accès non autorisé',
       });
-      return;
     }
 
-    // Mock: retourner liste vide
+    // Récupérer l'historique des diffusions avec pagination Prisma
+    const whereFilters: any = { etablissementId };
+    const total = await prisma.diffusion.count({ where: whereFilters });
+    const skip = (page - 1) * limit;
+
+    const diffusions = await prisma.diffusion.findMany({
+      where: whereFilters,
+      skip,
+      take: limit,
+      orderBy: { playedAt: 'desc' },
+      include: {
+        music: {
+          select: {
+            id: true,
+            titre: true,
+            artiste: true,
+            album: true,
+            isrc: true,
+          },
+        },
+      },
+    });
+
     res.json({
       success: true,
-      data: [],
+      data: diffusions.map(d => ({
+        id: d.id,
+        titre: d.titre,
+        artiste: d.artiste,
+        playedAt: d.playedAt,
+        duree: d.duree,
+        source: d.source,
+        music: d.music,
+      })),
       pagination: {
         page,
         limit,
-        total: 0,
-        totalPages: 0,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasPreviousPage: page > 1,
+        hasNextPage: page < Math.ceil(total / limit),
       },
     });
   } catch (error: any) {
+    console.error('Erreur lors de la récupération des diffusions:', error);
+    
+    if (error instanceof NotFoundError) {
+      return res.status(404).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Erreur serveur interne' 
+        : error.message,
     });
   }
 });

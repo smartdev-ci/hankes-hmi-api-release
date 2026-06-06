@@ -165,6 +165,8 @@ export const createDiffusionSchema = z.object({
   playedAt: z.string().datetime(),
   duree: z.number().positive(),
   source: z.enum(['capture', 'manual', 'playlist']),
+  userId: z.string().uuid().nullable().optional(),
+  captureId: z.string().uuid().nullable().optional(),
 });
 
 // ==================== DEVICES ====================

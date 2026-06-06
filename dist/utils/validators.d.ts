@@ -431,6 +431,8 @@ export declare const createDiffusionSchema: z.ZodObject<{
     playedAt: z.ZodString;
     duree: z.ZodNumber;
     source: z.ZodEnum<["capture", "manual", "playlist"]>;
+    userId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    captureId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
 }, "strip", z.ZodTypeAny, {
     artiste: string;
     etablissementId: string;
@@ -439,6 +441,8 @@ export declare const createDiffusionSchema: z.ZodObject<{
     titre: string;
     playedAt: string;
     source: "capture" | "manual" | "playlist";
+    userId?: string | null | undefined;
+    captureId?: string | null | undefined;
 }, {
     artiste: string;
     etablissementId: string;
@@ -447,6 +451,8 @@ export declare const createDiffusionSchema: z.ZodObject<{
     titre: string;
     playedAt: string;
     source: "capture" | "manual" | "playlist";
+    userId?: string | null | undefined;
+    captureId?: string | null | undefined;
 }>;
 export declare const registerDeviceSchema: z.ZodObject<{
     deviceId: z.ZodString;

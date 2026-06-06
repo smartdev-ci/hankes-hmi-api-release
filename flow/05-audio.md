@@ -12,7 +12,7 @@ Client [Bearer token]
   └─► 200 OK (statique)
         { dureeExtraitSecondes: 15, formatAudio: "wav",
           frequenceEchantillonnage: 44100, canaux: 1, bitrate: 128,
-          tailleMaxMo: 10, providers: ["acrcloud"], providerDefaut: "acrcloud" }
+          tailleMaxMo: 10, providers: ["local-cache", "local-fingerprint", "acrcloud"], providerDefaut: "local-fingerprint" }
 ```
 
 > À appeler au démarrage de l'application mobile pour configurer le recorder
@@ -36,31 +36,47 @@ Client [Bearer token]
   ├─► Validation manuelle : etablissementId requis → 400 si absent
   │
   ├─► AudioCaptureService.create (statut: "processing")
-  │     Stocke les métadonnées de capture en base
+  │     Stocke les métadonnées de la capture en base
   │     audioUrl = "memory://<filename>" (buffer en RAM, pas encore sur S3)
   │
+  ├─► fingerprintService.generate(audioBuffer, filename)
+  │
+  ├─► FingerprintRepository.findRecognitionByHash(fingerprintHash)
+  │     ├─ Match local trouvé → persistLocalMatch(...)
+  │     │     ├─ vérifie doublon via AudioCaptureService.checkDuplicate(...)
+  │     │     ├─ crée ou récupère le Track existant
+  │     │     ├─ MusicRecognitionService.createFromExisting(...)
+  │     │     ├─ enregistre l'empreinte locale
+  │     │     ├─ met en cache la reconnaissance
+  │     │     ├─ crée une Diffusion dans la table `diffusions`
+  │     │     └─ marque la capture comme traitée
+  │     │
+  │     └─ Pas de match local → persistAcrCloudMatch(...)
+  │
   ├─► acrcloudService.identify(audioFile.buffer, filename)
-  │     ├─ [Succès] → MusicRecognitionService.create
-  │     │     { captureId, titre, artiste, isrc, label, annee, genre,
-  │     │       confidence, source: "acrcloud", metadata }
-  │     │   → AudioCaptureService.markAsProcessed(capture.id)
-  │     │   → 200 OK { captureId, statut: "processed", resultat: recognition }
+  │     ├─ pas de métadonnées → AudioCaptureService.markAsFailed
+  │     │     → réponse avec `no_match`
   │     │
-  │     ├─ [Aucune correspondance] → AudioCaptureService.markAsFailed
-  │     │   → 200 OK { captureId, statut: "failed", resultat: null }
+  │     ├─ confiance < minConfidence → AudioCaptureService.markAsFailed
+  │     │     → réponse `low_confidence`, rejected: true
   │     │
-  │     └─ [Erreur ACRCloud] → AudioCaptureService.markAsFailed
-  │         → 502 Bad Gateway { error, captureId }
+  │     ├─ doublon détecté → AudioCaptureService.markAsFailed
+  │     │     → réponse `duplicate`, duplicate: true
+  │     │
+  │     └─ correspondance valide → MusicRecognitionService.create(...)
+  │           → persist fingerprint, cache recognition, create diffusion
+  │           → AudioCaptureService.markAsProcessed(capture.id)
+  │           → réponse avec statut `identified`, diffusion, provider: `acrcloud`
 ```
 
 ### États possibles d'une capture
 
-| Statut       | Signification                                       |
-|--------------|-----------------------------------------------------|
-| `processing` | Capture créée, identification en cours              |
-| `processed`  | Musique identifiée avec succès                      |
-| `failed`     | Aucune correspondance trouvée ou erreur ACRCloud     |
-| `pending`    | En attente de traitement (mode offline via /sync)   |
+| Statut        | Signification                                           |
+|---------------|---------------------------------------------------------|
+| `processing`  | Capture créée, identification en cours                  |
+| `identified`  | Musique identifiée avec succès                          |
+| `failed`      | Capture échouée ou rejetée                              |
+| `pending`     | En attente de synchronisation / traitement offline       |
 
 ---
 
@@ -74,18 +90,24 @@ Client [Bearer token]
   │
   ├─► Validation : tableau non vide → sinon 400
   │
-  ├─► Pour chaque capture (Promise.all) :
+  ├─► Pour chaque capture (séquentiellement) :
   │     AudioCaptureService.create
-  │       { etablissementId, userId, audioUrl: "offline://<localId>",
-  │         duree, format, taille, statut: "pending",
+  │       { etablissementId, userId, audioUrl: batch.audioUrl || 'offline://<localId>',
+  │         duree, format, taille, statut: 'pending',
   │         deviceId, capturedAt, syncedAt: now() }
   │
+  ├─► Si `titre` et `artiste` sont fournis :
+  │     TrackService.upsertFromRecognition(...)
+  │     MusicRecognitionService.create(...)
+  │     DiffusionService.create(...)
+  │     FingerprintRepository.create(...) si fingerprint fournie
+  │
   └─► 202 Accepted
-        { message: "N captures synchronisées", data: [ captures créées ] }
+        { success: true, message: "N capture(s) creee(s)", stats, data: [...] }
 ```
 
 > Utilisé quand l'appareil n'a pas de connexion au moment de la capture.
-> Les captures `pending` sont traitées ultérieurement (traitement différé non implémenté).
+> Le batch peut créer des captures `pending` et aussi des reconnaissances + diffusions si les métadonnées sont fournies.
 
 ---
 
@@ -99,8 +121,8 @@ Client [Bearer token]
   ├─► AudioCaptureService.findById(captureId)
   │     └─ Non trouvé → 404
   │
-  └─► 200 OK { data: capture }
-        { id, etablissementId, statut, duree, format, capturedAt, syncedAt }
+  └─► 200 OK { success: true, data: capture }
+        { id, etablissementId, statut, duree, format, capturedAt, syncedAt, recognition? }
 ```
 
 ---
@@ -111,32 +133,34 @@ Client [Bearer token]
 App mobile
   │
   ├─► Connexion disponible ?
-  │     OUI ──► POST /audio/capturer (identification immédiate ACRCloud)
+  │     OUI ──► POST /audio/capturer (identification hybride)
   │               │
-  │               └─ Réponse instantanée avec titre + artiste identifiés
+  │               ├─► recherche locale par fingerprint
+  │               └─► fallback ACRCloud si pas de match local
   │
   └─► NON ──► Enregistrement local (buffer + métadonnées)
                 │
                 └─► Reconnexion ──► POST /audio/sync (batch)
-                                      statut: "pending"
-                                      (traitement différé)
+                                      statut: 'pending' ou reconnaissance enregistrée si données fournies
 ```
 
 ---
 
-## Schéma d'identification ACRCloud
+## 5. Schéma d'identification hybride
 
 ```
 Buffer audio (WAV, 15s)
   │
-  ├─► acrcloudService.identify
-  │     API : identify-eu-west-1.acrcloud.com
+  ├─► fingerprintService.generate
   │
-  ├─► Réponse ACRCloud
-  │     { title, artist, isrc, label, releaseDate, genres[], confidence }
-  │
-  ├─► MusicRecognitionService.create
-  │     Stocke la reconnaissance liée à la capture
-  │
-  └─► Diffusion créée (lien entre établissement + musique + date)
+  ├─► FingerprintRepository.findRecognitionByHash
+  │     ├─ Match local
+  │     │     ├─ MusicRecognitionService.createFromExisting
+  │     │     ├─ DiffusionService.create
+  │     │     └─ AudioCaptureService.markAsProcessed
+  │     └─ Pas de match local
+  │           ├─ acrcloudService.identify
+  │           ├─ MusicRecognitionService.create
+  │           ├─ DiffusionService.create
+  │           └─ AudioCaptureService.markAsProcessed
 ```

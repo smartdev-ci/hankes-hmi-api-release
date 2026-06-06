@@ -74,6 +74,8 @@ export interface Diffusion {
   playedAt: Date;
   duree: number;
   source: 'capture' | 'manual' | 'playlist';
+  userId?: string | null;
+  captureId?: string | null;
   createdAt: Date;
 }
 

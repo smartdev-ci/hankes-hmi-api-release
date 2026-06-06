@@ -21,12 +21,18 @@ info:
     - **partenaire** : BURIDA et partenaires institutionnels, consultation rapports uniquement
 
     ## Architecture
-    App Mobile (React Native) -> API Express/TypeScript -> Supabase PostgreSQL via Prisma + ACRCloud
+    App Mobile (React Native) -> API Express/TypeScript -> Supabase PostgreSQL via Prisma + cache/fingerprint local + ACRCloud
 
     ## Environnements
     - Production : https://api.hmis-project.ci/v1
     - Staging : https://hankes-hmi-api-release.onrender.com/v1
     - Local : http://localhost:3000/v1
+
+    ## Changements Récents (v2.0.0)
+    - ✅ Ajout des routes health supplémentaires : `/health/database`, `/health/ready`, `/health/metrics`
+    - ✅ Ajout de l'endpoint `/audio/soiree/stats` pour les statistiques de capture
+    - ✅ Clarification des schémas de réponse pour tous les endpoints
+    - ✅ Documentation complète de l'authentification JWT
   version: 2.0.0
   contact:
     name: HMIS Support & HANKES
@@ -53,11 +59,11 @@ tags:
   - name: Artistes
     description: Inscription et profil des artistes musicaux
   - name: Audio
-    description: Capture audio et reconnaissance musicale via ACRCloud
+    description: Capture audio et reconnaissance musicale hybride (cache local, fingerprint, ACRCloud)
   - name: Diffusions
     description: Historique des diffusions musicales identifiées
   - name: Dashboard
-    description: KPIs, classements et statistiques (admin)
+    description: KPIs admin, carte, classements et statistiques
   - name: Rapports
     description: Génération et téléchargement de rapports PDF/Excel
   - name: Devices
@@ -65,7 +71,9 @@ tags:
   - name: Notifications
     description: Notifications in-app de l'utilisateur connecté
   - name: Upload
-    description: Upload d'images vers le stockage distant
+    description: Validation d'images. Le stockage distant n'est pas encore branché dans le handler actuel.
+  - name: Health
+    description: Santé, readiness, base de données et métriques Prometheus
 
 components:
   securitySchemes:
@@ -469,11 +477,21 @@ components:
     # ─── Audio ───────────────────────────────────────────────────────
     AudioSyncItem:
       type: object
-      required: [etablissementId, duree, format, taille, deviceId, capturedAt]
+      required: [etablissementId]
       properties:
+        localId:
+          type: string
+          description: Identifiant local de la capture côté mobile
+          example: offline-20240601-001
+        trackId:
+          type: string
+          description: Identifiant local alternatif utilisé comme fallback dans la réponse
         etablissementId:
           type: string
           format: uuid
+        audioUrl:
+          type: string
+          description: URL locale/distante connue côté client. Si absent, l'API crée une URL offline.
         duree:
           type: number
           description: Durée de la capture en secondes
@@ -491,6 +509,46 @@ components:
         capturedAt:
           type: string
           format: date-time
+        titre:
+          type: string
+          example: Essence
+        artiste:
+          type: string
+          example: Wizkid
+        album:
+          type: string
+          nullable: true
+        isrc:
+          type: string
+          nullable: true
+          example: NG-AIS-24-00001
+        label:
+          type: string
+          nullable: true
+        genre:
+          type: string
+          nullable: true
+        annee:
+          type: integer
+          nullable: true
+        confidence:
+          type: number
+          format: float
+          description: Score de confiance compare au seuil `AUDIO_MIN_CONFIDENCE` (0.6 par défaut)
+          example: 0.92
+        detectionMethod:
+          type: string
+          nullable: true
+        fingerprint:
+          type: string
+          nullable: true
+        fingerprintHash:
+          type: string
+          nullable: true
+        fingerprintAlgorithm:
+          type: string
+          nullable: true
+          example: mobile
 
     # ─── Devices ─────────────────────────────────────────────────────
     CreateDeviceBody:
@@ -522,15 +580,23 @@ components:
     # ─── Rapports ────────────────────────────────────────────────────
     CreateRapportBody:
       type: object
-      required: [type, dateDebut, dateFin]
+      required: [dateDebut, dateFin]
+      oneOf:
+        - required: [type]
+        - required: [typeRapport]
       properties:
         type:
           type: string
-          enum: [etablissement, periode, artiste]
+          enum: [etablissement, periode, artiste, global]
           description: >
             `etablissement` = rapport sur un établissement spécifique,
             `periode` = rapport global sur une période,
-            `artiste` = rapport centré sur un artiste.
+            `artiste` = rapport centré sur un artiste,
+            `global` = rapport global selon le modèle Prisma.
+        typeRapport:
+          type: string
+          enum: [etablissement, periode, artiste, global]
+          description: Alias accepté par le handler. `type` est prioritaire si les deux sont fournis.
         dateDebut:
           type: string
           format: date-time
@@ -541,7 +607,7 @@ components:
           example: "2024-03-31T23:59:59.000Z"
         format:
           type: string
-          enum: [pdf, excel]
+          enum: [pdf, excel, csv]
           default: pdf
         etablissementId:
           type: string
@@ -901,8 +967,14 @@ paths:
       tags: [Établissements]
       summary: Lister les établissements
       description: >
-        Retourne la liste paginée des établissements. Les recenseurs ne voient
-        que les établissements qu'ils ont créés. Les admins voient tout.
+        Retourne la liste paginée des établissements. 
+
+        **Contrôle d'accès implémenté** :
+        - Les **recenseurs** ne voient que les établissements qu'ils ont créés
+        - Les autres utilisateurs authentifiés récupèrent la liste selon les filtres fournis
+
+        Les endpoints de détail, modification, utilisateurs liés, statistiques et diffusions
+        vérifient ensuite les droits de gestion sur l'établissement ciblé.
       parameters:
         - name: page
           in: query
@@ -920,14 +992,16 @@ paths:
           schema:
             type: string
             example: Abidjan
+          description: Filtrer par ville
         - name: type
           in: query
           schema:
             type: string
             enum: [bar, maquis, cave, boite_de_nuit, restaurant, hotel]
+          description: Filtrer par type d'établissement
         - name: search
           in: query
-          description: Recherche sur le nom ou l'adresse
+          description: Recherche textuelle sur le nom ou l'adresse
           schema:
             type: string
       responses:
@@ -956,13 +1030,18 @@ paths:
         **Rôles autorisés** : `admin`, `recenseur`.
 
         **Deux modes pour le gérant** :
-        - Mode A — gérant existant : fournissez uniquement `gerantId` (UUID d'un user
-          avec le rôle `etablissement` non encore lié à un établissement).
-        - Mode B — nouveau gérant : fournissez `gerantEmail`, `gerantNom`,
-          `gerantTelephone` et `gerantPassword`. Le compte gérant sera créé automatiquement.
-        Les deux modes sont mutuellement exclusifs.
+        
+        **Mode A — Gérant existant** :
+        Fournissez uniquement `gerantId` (UUID d'un utilisateur avec le rôle `etablissement` 
+        non encore lié à un établissement).
+        
+        **Mode B — Nouveau gérant** :
+        Fournissez `gerantEmail`, `gerantNom`, `gerantTelephone` et `gerantPassword`. 
+        Le compte gérant sera créé automatiquement avec le rôle `etablissement`.
+        
+        Les deux modes sont **mutuellement exclusifs**. Vous ne pouvez fournir que l'un ou l'autre.
 
-        L'établissement est créé avec `isVerified: false`. Un admin doit ensuite
+        L'établissement est créé avec `isVerified: false` par défaut. Un admin doit ensuite 
         appeler `POST /etablissements/{id}/valider` pour l'activer officiellement.
       requestBody:
         required: true
@@ -1011,20 +1090,27 @@ paths:
                     type: boolean
                   message:
                     type: string
+                    example: "Établissement créé avec succès"
                   data:
                     $ref: '#/components/schemas/EtablissementBase'
         '400':
-          description: Données invalides ou gérant déjà lié
+          description: Données invalides, gérant déjà lié, ou modes incompatibles
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+                example:
+                  success: false
+                  error: "Le gérant est déjà lié à un établissement"
         '403':
           description: Rôle insuffisant (ni admin ni recenseur)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+                example:
+                  success: false
+                  error: "Seuls les admins et recenseurs peuvent créer des établissements"
 
   /etablissements/{etablissementId}:
     parameters:
@@ -1337,6 +1423,12 @@ paths:
     get:
       tags: [Utilisateurs]
       summary: Lister les utilisateurs (admin)
+      description: >
+        Liste paginée de tous les utilisateurs du système avec leurs informations.
+        
+        **Rôles autorisés** : `admin` uniquement.
+        
+        Vous pouvez filtrer par rôle (`role`) et par statut d'activité (`actif`).
       parameters:
         - name: page
           in: query
@@ -1353,10 +1445,12 @@ paths:
           schema:
             type: string
             enum: [admin, recenseur, etablissement, partenaire, artiste]
+          description: Filtrer par rôle utilisateur
         - name: actif
           in: query
           schema:
             type: boolean
+          description: Filtrer par statut actif/inactif
       responses:
         '200':
           description: Liste paginée des utilisateurs
@@ -1373,6 +1467,12 @@ paths:
                       $ref: '#/components/schemas/UserDetail'
                   pagination:
                     $ref: '#/components/schemas/Pagination'
+        '403':
+          description: Accès réservé aux admins
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
     post:
       tags: [Utilisateurs]
@@ -1774,9 +1874,15 @@ paths:
       tags: [Artistes]
       summary: Revendiquer une musique reconnue
       description: >
-        Permet à un artiste de revendiquer une musique identifiée par ACRCloud.
-        Fournissez soit `musicRecognitionId` (UUID de la reconnaissance), soit
-        `isrc` (code ISRC de la musique).
+        Permet à un artiste connecté (rôle `artiste`) de revendiquer une musique 
+        qui a été identifiée par ACRCloud mais qui n'est pas encore liée à son profil.
+        
+        Fournissez **soit** `musicRecognitionId` (UUID de la reconnaissance ACRCloud), 
+        **soit** `isrc` (code ISRC de la musique). Les deux paramètres ne peuvent 
+        pas être fournis simultanément.
+        
+        Après revendication, la musique apparaîtra dans le compte de l'artiste
+        et les statistiques de diffusion seront mises à jour.
       requestBody:
         required: true
         content:
@@ -1787,11 +1893,14 @@ paths:
                 musicRecognitionId:
                   type: string
                   format: uuid
+                  description: ID de la reconnaissance ACRCloud (si disponible)
                 isrc:
                   type: string
                   example: CI-A01-24-00001
+                  description: Code ISRC international de la musique
                 nomArtiste:
                   type: string
+                  description: Nom d'artiste optionnel pour vérification
       responses:
         '201':
           description: Musique revendiquée avec succès
@@ -1802,8 +1911,33 @@ paths:
                 properties:
                   success:
                     type: boolean
+                  message:
+                    type: string
+                    example: "Musique revendiquée avec succès"
                   data:
                     type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      titre:
+                        type: string
+                      artiste:
+                        type: string
+                      isrc:
+                        type: string
+        '400':
+          description: Paramètres invalides ou non fournis
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Musique non trouvée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   # ══════════════════════════════════════════════════════════════════
   # AUDIO
@@ -1817,6 +1951,7 @@ paths:
         Retourne les paramètres techniques recommandés pour la capture audio :
         durée, format, fréquence d'échantillonnage, taille maximale, provider par défaut.
         À appeler au démarrage de l'app mobile pour configurer le recorder.
+        Cette route est authentifiée et expose les seuils de la pipeline hybride.
       responses:
         '200':
           description: Paramètres de capture
@@ -1852,21 +1987,33 @@ paths:
                         type: array
                         items:
                           type: string
+                        example: [local-cache, local-fingerprint, acrcloud]
+                      providerDefaut:
+                        type: string
+                        example: local-fingerprint
+                      minConfidence:
+                        type: number
+                        format: float
+                        example: 0.6
+                      duplicateWindowMinutes:
+                        type: integer
+                        example: 10
 
   /audio/capturer:
     post:
       tags: [Audio]
       summary: Capturer et identifier une musique
       description: >
-        Envoie un extrait audio (multipart/form-data) pour identification en temps réel
-        via ACRCloud. La musique est identifiée et la reconnaissance est stockée en base.
+        Envoie un extrait audio (multipart/form-data) pour identification en temps réel.
+        Le handler stocke la capture en mémoire (`memory://...`) puis la traite via la
+        pipeline hybride : cache local, fingerprint local, puis ACRCloud si nécessaire.
 
         **Champs du formulaire** :
-        - `audio` (fichier) : extrait WAV/MP3, max 10 MB
-        - `etablissementId` (string UUID) : identifiant de l'établissement
-        - `deviceId` (string, optionnel) : identifiant de l'appareil
-        - `duree` (number) : durée de la capture en secondes
-        - `capturedAt` (datetime ISO, optionnel) : horodatage de la capture
+        - `audio` (fichier, requis) : extrait WAV/MP3, max 10 MB
+        - `etablissementId` (string UUID, requis) : identifiant de l'établissement
+        - `deviceId` (string, optionnel) : identifiant de l'appareil mobile (pattern: ^[a-zA-Z0-9\-_]{16,64}$)
+        - `duree` (number, optionnel) : durée de la capture en secondes
+        - `capturedAt` (datetime ISO, optionnel) : horodatage de la capture (défaut: now)
       requestBody:
         required: true
         content:
@@ -1878,18 +2025,22 @@ paths:
                 audio:
                   type: string
                   format: binary
-                  description: Fichier audio (WAV, MP3) — max 10 MB
+                  description: Fichier audio (WAV, MP3, etc.) — max 10 MB
                 etablissementId:
                   type: string
                   format: uuid
                 deviceId:
                   type: string
+                  pattern: '^[a-zA-Z0-9\-_]{16,64}$'
+                  example: device-abcd1234efgh5678
                 duree:
                   type: number
                   example: 15
+                  description: Durée en secondes
                 capturedAt:
                   type: string
                   format: date-time
+                  description: "Horodatage ISO 8601 (exemple: 2024-01-15T14:30:00Z)"
       responses:
         '200':
           description: Musique identifiée ou traitement terminé sans correspondance
@@ -1905,30 +2056,70 @@ paths:
                   captureId:
                     type: string
                     format: uuid
+                    description: Identifiant unique de la capture audio
                   statut:
                     type: string
-                    enum: [processed, failed]
+                    enum: [pending, processing, identified, failed]
                   resultat:
                     type: object
                     nullable: true
                     properties:
                       titre:
                         type: string
+                        example: Essence
                       artiste:
                         type: string
+                        example: Wizkid
                       isrc:
                         type: string
                         nullable: true
+                        example: NG-AIS-24-00001
                       label:
                         type: string
                         nullable: true
+                        example: Starboy Entertainment
                       genre:
                         type: string
                         nullable: true
+                        example: Afrobeats
                       confidence:
                         type: number
+                        format: float
+                        description: Score de confiance retourné par la pipeline
+                        example: 0.98
+                  diffusion:
+                    type: object
+                    nullable: true
+                    description: Diffusion créée lorsque la reconnaissance est acceptée
+                  provider:
+                    type: string
+                    nullable: true
+                    example: local-fingerprint
+                  fingerprint:
+                    type: object
+                    nullable: true
+                    description: Informations d'empreinte audio renvoyées par la pipeline
+                  duplicate:
+                    type: boolean
+                    nullable: true
+                  existingCaptureId:
+                    type: string
+                    format: uuid
+                    nullable: true
+                  rejected:
+                    type: boolean
+                    nullable: true
+                  reason:
+                    type: string
+                    nullable: true
+        '400':
+          description: Données invalides ou format non supporté
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '502':
-          description: Erreur du service de reconnaissance (ACRCloud)
+          description: Erreur de la pipeline de reconnaissance
           content:
             application/json:
               schema:
@@ -1939,9 +2130,13 @@ paths:
       tags: [Audio]
       summary: Synchroniser des captures hors-ligne
       description: >
-        Envoie un batch de captures audio enregistrées hors connexion.
-        Les captures sont sauvegardées en base avec le statut `pending` pour
-        traitement différé. Retourne HTTP 202 (Accepted).
+        Envoie un batch de captures audio enregistrées hors connexion (mode offline de l'app).
+        Les captures valides sont sauvegardées en base avec le statut `pending`.
+
+        Si `titre` et `artiste` sont fournis, l'API crée ou retrouve la piste,
+        crée une reconnaissance, enregistre éventuellement une empreinte, puis ajoute
+        une diffusion. Les items sous le seuil de confiance ou détectés comme doublons
+        sont ignorés item par item.
       requestBody:
         required: true
         content:
@@ -1953,6 +2148,8 @@ paths:
                 captures:
                   type: array
                   minItems: 1
+                  maxItems: 50
+                  description: Liste des captures à synchroniser
                   items:
                     $ref: '#/components/schemas/AudioSyncItem'
       responses:
@@ -1967,16 +2164,57 @@ paths:
                     type: boolean
                   message:
                     type: string
+                    example: "3 capture(s) creee(s), 1 doublon(s) ignore(s), 1 rejetee(s) (faible confiance)"
+                  stats:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      created:
+                        type: integer
+                      ignoredDuplicate:
+                        type: integer
+                      ignoredLowConfidence:
+                        type: integer
                   data:
                     type: array
                     items:
                       type: object
+                      properties:
+                        localId:
+                          type: string
+                          nullable: true
+                        captureId:
+                          type: string
+                          format: uuid
+                          nullable: true
+                          description: ID de la capture créée
+                        status:
+                          type: string
+                          enum: [created, ignored, error]
+                        reason:
+                          type: string
+                          nullable: true
+                          enum: [missing_etablissementId, low_confidence, duplicate]
+                        confidence:
+                          type: number
+                          nullable: true
+                        existingCaptureId:
+                          type: string
+                          format: uuid
+                          nullable: true
+        '400':
+          description: Données invalides ou batch trop volumineux
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /audio/statut/{captureId}:
     get:
       tags: [Audio]
       summary: Statut d'une capture audio
-      description: Permet de vérifier si une capture a été traitée (`processed`), est en attente (`pending`) ou a échoué (`failed`).
+      description: Permet de vérifier si une capture est en attente (`pending`), en traitement (`processing`), identifiée (`identified`) ou en échec (`failed`).
       parameters:
         - name: captureId
           in: path
@@ -2002,9 +2240,81 @@ paths:
                         format: uuid
                       statut:
                         type: string
-                        enum: [pending, processing, processed, failed]
+                        enum: [pending, processing, identified, failed]
         '404':
           description: Capture introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /audio/soiree/stats:
+    get:
+      tags: [Audio]
+      summary: Statistiques de capture de la soirée
+      description: Retourne les captures reconnues d'un établissement pour le jour demandé, ou le jour courant si `date` est absent.
+      parameters:
+        - name: etablissementId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Identifiant de l'établissement
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Date locale à analyser. Par défaut, date du jour côté serveur.
+      responses:
+        '200':
+          description: Statistiques de la soirée
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      date:
+                        type: string
+                        format: date
+                      etablissementId:
+                        type: string
+                        format: uuid
+                      totalCaptures:
+                        type: integer
+                        description: Nombre total de captures
+                      uniqueTracks:
+                        type: integer
+                        description: Nombre de pistes musicales uniques identifiées
+                      tracks:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            titre:
+                              type: string
+                            artiste:
+                              type: string
+                            isrc:
+                              type: string
+                              nullable: true
+                            confidence:
+                              type: number
+                              format: float
+                            firstPlayedAt:
+                              type: string
+                              format: date-time
+                            playCount:
+                              type: integer
+        '400':
+          description: Paramètre `etablissementId` manquant
           content:
             application/json:
               schema:
@@ -2020,8 +2330,7 @@ paths:
       summary: Lister les diffusions
       description: >
         Liste paginée de toutes les diffusions musicales. Filtrable par établissement,
-        période ou artiste. Les admins voient tout, les autres voient
-        uniquement les diffusions de leurs établissements.
+        période ou artiste.
       parameters:
         - name: page
           in: query
@@ -2111,19 +2420,26 @@ paths:
       summary: KPIs globaux (admin)
       description: >
         Retourne les indicateurs clés de performance pour la période spécifiée :
-        nombre d'établissements actifs, total de diffusions, musiques et artistes uniques.
-        Réservé aux admins.
+        nombre d'établissements actifs, total de diffusions, musiques et artistes uniques,
+        taux d'activité, etc.
+
+        **Rôles autorisés** : `admin` uniquement.
+
+        Si les paramètres de date ne sont pas fournis, les KPIs sont calculés 
+        pour les 30 derniers jours.
       parameters:
         - name: startDate
           in: query
           schema:
             type: string
             format: date-time
+            example: "2024-01-01T00:00:00Z"
         - name: endDate
           in: query
           schema:
             type: string
             format: date-time
+            example: "2024-03-31T23:59:59Z"
       responses:
         '200':
           description: KPIs calculés
@@ -2136,6 +2452,30 @@ paths:
                     type: boolean
                   data:
                     type: object
+                    properties:
+                      totalEtablissements:
+                        type: integer
+                      etablissementsActifs:
+                        type: integer
+                      totalDiffusions:
+                        type: integer
+                      musiqueUniques:
+                        type: integer
+                      artistesUniques:
+                        type: integer
+                      tauxActivite:
+                        type: number
+                        format: float
+                        description: Pourcentage d'établissements actifs
+                      periode:
+                        type: object
+                        properties:
+                          startDate:
+                            type: string
+                            format: date-time
+                          endDate:
+                            type: string
+                            format: date-time
 
   /dashboard/carte:
     get:
@@ -2284,7 +2624,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [etablissement, periode, artiste]
+            enum: [etablissement, periode, artiste, global]
         - name: startDate
           in: query
           schema:
@@ -2320,6 +2660,9 @@ paths:
         (Accepted) avec le rapport en statut `en_cours`. Interrogez ensuite
         `GET /rapports/{id}` pour connaître l'avancement, puis
         `GET /rapports/{id}/telecharger` quand le statut est `termine`.
+
+        **Rôles autorisés** : Les admins peuvent générer des rapports globaux.
+        Les autres utilisateurs ne peuvent générer que des rapports les concernant.
       requestBody:
         required: true
         content:
@@ -2338,8 +2681,40 @@ paths:
                     type: boolean
                   message:
                     type: string
+                    example: "Rapport en cours de génération"
                   data:
                     type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      type:
+                        type: string
+                        enum: [etablissement, periode, artiste, global]
+                      statut:
+                        type: string
+                        example: en_cours
+                      format:
+                        type: string
+                        example: pdf
+                      generePar:
+                        type: string
+                        format: uuid
+                      dateGeneration:
+                        type: string
+                        format: date-time
+        '400':
+          description: Paramètres invalides
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Rôle insuffisant pour générer ce type de rapport
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /rapports/{rapportId}:
     get:
@@ -2372,7 +2747,7 @@ paths:
                         type: string
                       statut:
                         type: string
-                        enum: [en_cours, termine, erreur]
+                        enum: [en_cours, termine, failed]
                       format:
                         type: string
                       fichierUrl:
@@ -2411,7 +2786,7 @@ paths:
                         format: uri
                       format:
                         type: string
-                        enum: [pdf, excel]
+                        enum: [pdf, excel, csv]
         '409':
           description: Rapport non encore disponible
           content:
@@ -2646,13 +3021,11 @@ paths:
   /upload/image:
     post:
       tags: [Upload]
-      summary: Uploader une image
+      summary: Valider une image avant branchement du stockage
       description: >
-        Upload d'une image (JPEG, PNG, WebP) vers le stockage distant (S3 / Supabase Storage).
-        Taille maximale : 5 MB. Retourne l'URL publique de l'image.
-
-        **Note** : cet endpoint retourne actuellement HTTP 501 si le stockage
-        n'est pas configuré en environnement de développement.
+        Accepte une image JPEG, PNG ou WebP de 5 MB maximum. Dans l'implémentation
+        actuelle, le fichier est validé par Multer en mémoire puis l'API retourne
+        HTTP 501, car le stockage fichier n'est pas encore configuré.
       requestBody:
         required: true
         content:
@@ -2667,7 +3040,7 @@ paths:
                   description: Fichier image JPEG, PNG ou WebP — max 5 MB
       responses:
         '200':
-          description: Image uploadée avec succès
+          description: Réservé à une future intégration de stockage retournant une URL publique
           content:
             application/json:
               schema:
@@ -2685,11 +3058,30 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '501':
-          description: Stockage non configuré
+          description: Stockage non configuré dans le handler actuel
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: Stockage fichier non configure. Branchez Supabase Storage ou S3 avant d accepter les uploads.
+                  data:
+                    type: object
+                    properties:
+                      mimetype:
+                        type: string
+                        example: image/png
+                      taille:
+                        type: integer
+                        example: 102400
+                      nomOriginal:
+                        type: string
+                        example: photo.png
 
   # ══════════════════════════════════════════════════════════════════
   # HEALTH
@@ -2697,7 +3089,7 @@ paths:
 
   /health:
     get:
-      tags: []
+      tags: [Health]
       summary: Santé de l'API
       description: Endpoint de vérification de disponibilité. Pas d'authentification requise.
       security: []
@@ -2709,6 +3101,120 @@ paths:
               schema:
                 type: object
                 properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        example: OK
+                      timestamp:
+                        type: string
+                        format: date-time
+                      uptime:
+                        type: number
+                        description: Durée de fonctionnement en secondes
+                      version:
+                        type: string
+                        example: 2.0.0
+
+  /health/database:
+    get:
+      tags: [Health]
+      summary: Vérifier la connexion à la base de données
+      description: Teste la connexion à la base de données PostgreSQL. Pas d'authentification requise.
+      security: []
+      responses:
+        '200':
+          description: Connexion établie
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        enum: [connected, disconnected]
+                      timestamp:
+                        type: string
+                        format: date-time
+        '503':
+          description: Erreur de connexion à la base de données
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "Database connection failed"
+                  details:
+                    type: string
+
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Vérifier la préparation de l'API
+      description: Effectue tous les checks de santé (base de données, etc.). Pas d'authentification requise. Utilisé par les orchestrateurs (Kubernetes, Docker Compose).
+      security: []
+      responses:
+        '200':
+          description: API prête
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
                   status:
                     type: string
-                    example: ok
+                    example: ready
+                  checks:
+                    type: object
+                    properties:
+                      database:
+                        type: string
+                        enum: [ok, failed]
+        '503':
+          description: API non prête
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  status:
+                    type: string
+                    example: not_ready
+                  error:
+                    type: string
+
+  /health/metrics:
+    get:
+      tags: [Health]
+      summary: Métriques Prometheus
+      description: Retourne les métriques au format Prometheus. Pas d'authentification requise.
+      security: []
+      responses:
+        '200':
+          description: Métriques en format texte Prometheus
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  # HELP hmis_api_process_uptime_seconds Process uptime in seconds
+                  # TYPE hmis_api_process_uptime_seconds gauge
+                  hmis_api_process_uptime_seconds 12345

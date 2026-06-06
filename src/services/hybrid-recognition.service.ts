@@ -13,7 +13,7 @@ import recognitionCacheService, { CachedRecognition } from './recognition-cache.
 interface ProcessCaptureInput {
   captureId: string;
   etablissementId: string;
-  userId: string;
+  userId?: string | null;
   audioBuffer: Buffer;
   filename: string;
   capturedAt: Date;
@@ -162,8 +162,7 @@ export class HybridRecognitionService {
       FingerprintRepository.toCachedRecognition(recognition)
     );
 
-    const diffusion = await this.createDiffusion(input, recognition);
-    const capture = await AudioCaptureService.markAsProcessed(input.captureId);
+    const { capture, diffusion } = await this.finalizeRecognition(input, recognition);
 
     return {
       status: 'identified',
@@ -218,8 +217,7 @@ export class HybridRecognitionService {
       FingerprintRepository.toCachedRecognition(recognition)
     );
 
-    const diffusion = await this.createDiffusion(input, recognition);
-    const capture = await AudioCaptureService.markAsProcessed(input.captureId);
+    const { capture, diffusion } = await this.finalizeRecognition(input, recognition);
 
     return {
       status: 'identified',
@@ -232,6 +230,12 @@ export class HybridRecognitionService {
     };
   }
 
+  private async finalizeRecognition(input: ProcessCaptureInput, recognition: any) {
+    const diffusion = await this.createDiffusion(input, recognition);
+    const capture = await AudioCaptureService.markAsProcessed(input.captureId);
+    return { capture, diffusion };
+  }
+
   private async createDiffusion(input: ProcessCaptureInput, recognition: any) {
     return DiffusionService.create({
       etablissementId: input.etablissementId,
@@ -241,8 +245,8 @@ export class HybridRecognitionService {
       playedAt: input.capturedAt,
       duree: input.duree,
       source: 'capture',
-      userId: input.userId,
-      captureId: input.captureId,
+      userId: input.userId || null,
+      captureId: input.captureId || null,
     });
   }
 

@@ -14,15 +14,35 @@ const middleware_1 = require("./middleware");
 const config_1 = require("./config");
 const app = (0, express_1.default)();
 exports.app = app;
+app.disable('x-powered-by');
 // Security middleware
-app.use((0, helmet_1.default)());
+app.use((0, helmet_1.default)({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            baseUri: ["'self'"],
+            frameAncestors: ["'none'"],
+            objectSrc: ["'none'"],
+        },
+    },
+    hsts: config_1.config.nodeEnv === 'production'
+        ? { maxAge: 15552000, includeSubDomains: true, preload: true }
+        : false,
+}));
 // CORS configuration
+const corsOrigin = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
+    : '*';
+const corsAllowsWildcard = corsOrigin === '*' || (Array.isArray(corsOrigin) &&
+    corsOrigin.length === 1 &&
+    corsOrigin[0] === '*');
 app.use((0, cors_1.default)({
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: corsAllowsWildcard ? '*' : corsOrigin,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true,
+    credentials: !corsAllowsWildcard,
 }));
+app.use((0, middleware_1.rateLimiter)(config_1.config.rateLimit.windowMs, config_1.config.rateLimit.maxRequests));
 // Body parsing middleware
 app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '10mb' }));

@@ -136,6 +136,8 @@ exports.createDiffusionSchema = zod_1.z.object({
     playedAt: zod_1.z.string().datetime(),
     duree: zod_1.z.number().positive(),
     source: zod_1.z.enum(['capture', 'manual', 'playlist']),
+    userId: zod_1.z.string().uuid().nullable().optional(),
+    captureId: zod_1.z.string().uuid().nullable().optional(),
 });
 // ==================== DEVICES ====================
 exports.registerDeviceSchema = zod_1.z.object({

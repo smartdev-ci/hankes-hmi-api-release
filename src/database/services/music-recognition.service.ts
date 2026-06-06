@@ -9,6 +9,7 @@ import { DatabaseError, NotFoundError } from '../errors';
 interface MusicRecognition {
   id: string;
   captureId: string;
+  trackId: string | null;
   titre: string;
   artiste: string;
   album: string | null;
@@ -24,6 +25,7 @@ interface MusicRecognition {
 
 interface MusicRecognitionInsert {
   captureId: string;
+  trackId?: string | null;
   titre: string;
   artiste: string;
   album?: string | null;
@@ -37,6 +39,7 @@ interface MusicRecognitionInsert {
 }
 
 interface MusicRecognitionUpdate {
+  trackId?: string | null;
   titre?: string;
   artiste?: string;
   album?: string | null;
@@ -99,6 +102,23 @@ export class MusicRecognitionService {
       if (error instanceof DatabaseError) throw error;
       throw new DatabaseError('Erreur lors de la création de la reconnaissance');
     }
+  }
+
+  static async createFromExisting(
+    captureId: string,
+    recognition: Omit<MusicRecognitionInsert, 'captureId'>,
+    source: string
+  ): Promise<MusicRecognition> {
+    return this.create({
+      ...recognition,
+      captureId,
+      source,
+      metadata: {
+        ...(recognition.metadata || {}),
+        localRecognition: true,
+        originalSource: recognition.source,
+      },
+    });
   }
 
   static async update(id: string, data: MusicRecognitionUpdate): Promise<MusicRecognition> {

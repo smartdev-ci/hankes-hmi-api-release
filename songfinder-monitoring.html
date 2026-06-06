@@ -1,0 +1,1303 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#6C3CE1" />
+  <title>SongFinder - Monitoring Mode</title>
+  <link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiU29uZ0ZpbmRlciIsInNob3J0X25hbWUiOiJTb25nRmluZGVyIiwic3RhcnRfdXJsIjoiLiIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwiYmFja2dyb3VuZF9jb2xvciI6IiMxYTFhMmUiLCJ0aGVtZV9jb2xvciI6IiM2QzNDRTEiLCJpY29ucyI6W3sic3JjIjoiaWNvbi0xOTIucG5nIiwic2l6ZXMiOiIxOTJ4MTkyIiwidHlwZSI6ImltYWdlL3BuZyJ9XX0=" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary: #6C3CE1; --primary-dark: #5429C0; --primary-light: #8B5CF6;
+      --accent: #F472B6; --bg: #0f0f1e; --bg-card: #1a1a2e; --bg-card-hover: #232345;
+      --text: #EAEAEA; --text-muted: #9CA3AF; --success: #34D399; --error: #F87171;
+      --warning: #FBBF24; --radius: 16px; --radius-sm: 10px;
+      --shadow: 0 8px 32px rgba(0,0,0,.5); --transition: .3s cubic-bezier(.4,0,.2,1);
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg); color: var(--text); min-height: 100dvh;
+      display: flex; flex-direction: column; align-items: center; padding: 1rem;
+      background-image: radial-gradient(circle at 20% 0%, rgba(108,60,225,.15), transparent 50%),
+                        radial-gradient(circle at 80% 100%, rgba(244,114,182,.1), transparent 50%);
+    }
+
+    .login-container { width: 100%; max-width: 400px; margin: 2rem auto; animation: fadeIn .3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .login-card { background: var(--bg-card); border-radius: var(--radius); padding: 2rem; box-shadow: var(--shadow); border: 1px solid rgba(255,255,255,.06); }
+    .login-logo { text-align: center; margin-bottom: 1.5rem; }
+    .login-logo h1 { font-size: 1.8rem; background: linear-gradient(135deg, var(--primary-light), var(--accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .login-logo p { color: var(--text-muted); font-size: .9rem; margin-top: .3rem; }
+    .form-group { margin-bottom: 1rem; }
+    .form-group label { display: block; font-size: .85rem; color: var(--text-muted); margin-bottom: .4rem; }
+    .form-group input { width: 100%; padding: .8rem 1rem; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,.1); background: rgba(0,0,0,.3); color: var(--text); font-size: 1rem; outline: none; transition: border-color var(--transition); }
+    .form-group input:focus { border-color: var(--primary-light); }
+    .btn-login { width: 100%; padding: 1rem; background: linear-gradient(135deg, var(--primary), var(--primary-dark)); color: white; border: none; border-radius: var(--radius-sm); font-size: 1rem; font-weight: 600; cursor: pointer; transition: all var(--transition); margin-top: .5rem; }
+    .btn-login:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(108,60,225,.4); }
+    .btn-login:disabled { opacity: .6; cursor: not-allowed; }
+
+    header { text-align: center; padding: 1rem; width: 100%; max-width: 700px; }
+    header h1 { font-size: clamp(1.5rem, 5vw, 2rem); background: linear-gradient(135deg, var(--primary-light), var(--accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: .2rem; }
+    header p { color: var(--text-muted); font-size: .85rem; }
+    .top-bar { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .5rem; font-size: .8rem; }
+    .user-badge { display: flex; align-items: center; gap: .5rem; }
+    .user-avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--primary), var(--accent)); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .8rem; }
+    .btn-logout { background: none; border: 1px solid rgba(255,255,255,.2); color: var(--text-muted); padding: .2rem .6rem; border-radius: 20px; font-size: .75rem; cursor: pointer; }
+
+    .status-bar { display: flex; align-items: center; justify-content: center; gap: .6rem; padding: .4rem .8rem; background: rgba(0,0,0,.3); border-radius: 20px; font-size: .8rem; flex-wrap: wrap; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); animation: pulse 2s infinite; flex-shrink: 0; }
+    .status-dot.offline { background: var(--text-muted); animation: none; }
+    .status-dot.warning { background: var(--warning); }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+
+    main { width: 100%; max-width: 700px; display: flex; flex-direction: column; gap: 1rem; padding-bottom: 2rem; }
+    .card { background: var(--bg-card); border-radius: var(--radius); padding: 1.2rem; box-shadow: var(--shadow); border: 1px solid rgba(255,255,255,.06); }
+    .card-title { font-size: .95rem; font-weight: 600; margin-bottom: .8rem; display: flex; align-items: center; gap: .5rem; }
+    .settings-grid { display: grid; gap: .6rem; }
+    .settings-grid label { font-size: .8rem; color: var(--text-muted); display: flex; flex-direction: column; gap: .3rem; }
+    .settings-grid input { background: rgba(0,0,0,.3); border: 1px solid rgba(255,255,255,.1); border-radius: var(--radius-sm); padding: .6rem .8rem; color: var(--text); font-size: .9rem; outline: none; }
+
+    .monitoring-hero {
+      background: linear-gradient(145deg, rgba(108,60,225,.2), rgba(244,114,182,.08));
+      border: 1px solid rgba(139,92,246,.3); border-radius: var(--radius);
+      padding: 1.5rem; text-align: center; position: relative; overflow: hidden;
+    }
+    .monitoring-hero::before {
+      content: ''; position: absolute; inset: 0; pointer-events: none;
+      background: radial-gradient(circle at 50% 0%, rgba(139,92,246,.15), transparent 70%);
+    }
+    .state-badge {
+      display: inline-flex; align-items: center; gap: .4rem;
+      padding: .3rem .8rem; border-radius: 20px;
+      font-size: .75rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; margin-bottom: 1rem;
+    }
+    .state-badge.searching { background: rgba(251,191,36,.2); color: var(--warning); border: 1px solid rgba(251,191,36,.4); }
+    .state-badge.locked { background: rgba(52,211,153,.2); color: var(--success); border: 1px solid rgba(52,211,153,.4); }
+    .state-badge.transition { background: rgba(96,165,250,.2); color: #60A5FA; border: 1px solid rgba(96,165,250,.4); animation: pulse 1s infinite; }
+    .state-badge.idle { background: rgba(156,163,175,.2); color: var(--text-muted); border: 1px solid rgba(156,163,175,.4); }
+    .state-badge .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+
+    .session-timer { font-size: 2rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text); margin-bottom: .3rem; letter-spacing: -1px; }
+    .session-label { font-size: .75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 1.2rem; }
+
+    .btn-monitor {
+      width: 100%; padding: 1.1rem; border: none; border-radius: var(--radius-sm);
+      font-size: 1.05rem; font-weight: 700; cursor: pointer; color: white;
+      transition: all var(--transition); display: flex; align-items: center; justify-content: center; gap: .6rem;
+    }
+    .btn-monitor.start { background: linear-gradient(135deg, var(--success), #059669); }
+    .btn-monitor.stop { background: linear-gradient(135deg, #EF4444, #DC2626); animation: pulse-record 1.5s infinite; }
+    .btn-monitor:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.3); }
+    .btn-monitor:disabled { opacity: .5; cursor: not-allowed; animation: none; }
+    @keyframes pulse-record { 0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,.5); } 50% { box-shadow: 0 0 0 10px rgba(239,68,68,0); } }
+
+    .current-track {
+      background: linear-gradient(145deg, rgba(244,114,182,.12), rgba(108,60,225,.08));
+      border: 1px solid rgba(244,114,182,.25); border-radius: var(--radius);
+      padding: 1.3rem; animation: slideIn .4s ease;
+    }
+    @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    
+    .track-header { display: flex; gap: 1rem; align-items: flex-start; margin-bottom: 1rem; }
+    .track-cover {
+      width: 64px; height: 64px; border-radius: 12px;
+      background: linear-gradient(135deg, #4F46E5, #EC4899);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.8rem; flex-shrink: 0;
+    }
+    .track-info { flex: 1; min-width: 0; }
+    .track-title { font-size: 1.2rem; font-weight: 700; line-height: 1.2; margin-bottom: .2rem; word-break: break-word; }
+    .track-artist { color: var(--accent); font-size: .95rem; margin-bottom: .3rem; }
+    .match-badge { display: inline-block; background: var(--success); color: #064E3B; font-size: .7rem; font-weight: 700; padding: .15rem .5rem; border-radius: 12px; }
+    
+    .track-meta { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .8rem; }
+    .meta-chip { background: rgba(0,0,0,.25); padding: .35rem .6rem; border-radius: 12px; font-size: .75rem; }
+    .meta-chip .lbl { color: var(--text-muted); margin-right: .3rem; }
+    .track-elapsed { font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--primary-light); text-align: center; margin: .5rem 0; }
+    .track-elapsed-label { text-align: center; font-size: .7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: .8rem; }
+
+    .analysis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; margin-top: .8rem; }
+    .analysis-item { background: rgba(0,0,0,.25); padding: .7rem; border-radius: var(--radius-sm); }
+    .analysis-label { font-size: .7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: .4rem; display: flex; justify-content: space-between; }
+    .progress-bar { height: 6px; background: rgba(255,255,255,.08); border-radius: 3px; overflow: hidden; }
+    .progress-fill { height: 100%; border-radius: 3px; transition: width .3s ease, background .3s ease; }
+    .progress-fill.good { background: linear-gradient(90deg, var(--success), #10B981); }
+    .progress-fill.warning { background: linear-gradient(90deg, var(--warning), #F59E0B); }
+    .progress-fill.danger { background: linear-gradient(90deg, var(--error), #DC2626); }
+
+    .waveform-container { height: 50px; margin-top: .8rem; background: rgba(0,0,0,.3); border-radius: var(--radius-sm); overflow: hidden; position: relative; }
+    .waveform-container canvas { width: 100%; height: 100%; display: block; }
+    .waveform-indicator { position: absolute; top: .4rem; right: .5rem; display: flex; align-items: center; gap: .3rem; font-size: .7rem; color: var(--error); font-weight: 600; }
+    .rec-dot { width: 6px; height: 6px; background: var(--error); border-radius: 50%; animation: pulse 1s infinite; }
+
+    .history-list { max-height: 300px; overflow-y: auto; }
+    .history-item {
+      display: grid; grid-template-columns: auto 1fr auto; gap: .7rem; padding: .6rem .5rem;
+      border-radius: var(--radius-sm); transition: background var(--transition);
+      border-bottom: 1px solid rgba(255,255,255,.04);
+    }
+    .history-item:hover { background: rgba(255,255,255,.03); }
+    .history-item:last-child { border-bottom: none; }
+    .history-time { font-size: .75rem; color: var(--text-muted); font-variant-numeric: tabular-nums; min-width: 44px; }
+    .history-info { min-width: 0; }
+    .history-title { font-weight: 600; font-size: .88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .history-artist { color: var(--accent); font-size: .75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .history-duration { font-size: .75rem; color: var(--text-muted); text-align: right; }
+    .history-method { font-size: .65rem; padding: .1rem .4rem; border-radius: 8px; background: rgba(139,92,246,.2); color: var(--primary-light); display: inline-block; margin-top: .2rem; }
+    .history-empty { text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: .85rem; }
+
+    .sync-banner { display: flex; align-items: center; gap: .6rem; padding: .6rem .8rem; background: rgba(251,191,36,.1); border: 1px solid rgba(251,191,36,.25); border-radius: var(--radius-sm); font-size: .8rem; color: var(--warning); margin-bottom: .8rem; }
+    .sync-banner.ok { background: rgba(52,211,153,.1); border-color: rgba(52,211,153,.25); color: var(--success); }
+    
+    .message { padding: .8rem 1rem; border-radius: var(--radius-sm); font-size: .88rem; margin-top: .5rem; display: flex; align-items: flex-start; gap: .5rem; }
+    .message.error { background: rgba(248,113,113,.12); border: 1px solid rgba(248,113,113,.25); color: var(--error); }
+    .message.info { background: rgba(96,165,250,.12); border: 1px solid rgba(96,165,250,.25); color: #60A5FA; }
+
+    .settings-toggle { margin-left: auto; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: .9rem; padding: .2rem .5rem; }
+    .btn-export { width: 100%; padding: .7rem; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); color: var(--text); border-radius: var(--radius-sm); font-weight: 600; cursor: pointer; margin-top: .8rem; transition: all var(--transition); font-size: .9rem; }
+    .btn-export:hover { background: rgba(255,255,255,.1); }
+
+    @media (max-width: 480px) {
+      .analysis-grid { grid-template-columns: 1fr; }
+      .session-timer { font-size: 1.6rem; }
+    }
+    .hidden { display: none !important; }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <div v-if="!isAuthenticated" class="login-container">
+      <div class="login-card">
+        <div class="login-logo">
+          <h1>SongFinder</h1>
+          <p>Hankes Music Intelligence System</p>
+        </div>
+        <form @submit.prevent="handleLogin">
+          <div class="form-group">
+            <label for="email">Email ou identifiant</label>
+            <input id="email" v-model="loginForm.email" type="text" placeholder="votre@email.com" required autocomplete="username" />
+          </div>
+          <div class="form-group">
+            <label for="password">Mot de passe</label>
+            <input id="password" v-model="loginForm.password" type="password" placeholder="********" required autocomplete="current-password" />
+          </div>
+          <button type="submit" class="btn-login" :disabled="loadingAuth">
+            <template v-if="loadingAuth">Connexion en cours...</template>
+            <template v-else>Se connecter</template>
+          </button>
+        </form>
+        <div v-if="authError" class="message error" style="margin-top:1rem;">
+          <span>Erreur:</span><div>{{ authError }}</div>
+        </div>
+      </div>
+    </div>
+
+    <template v-else>
+      <header>
+        <div class="top-bar">
+          <div class="user-badge">
+            <div class="user-avatar">{{ userInitials }}</div>
+            <span style="color: var(--text-muted); font-size: .8rem;">{{ userEmail }}</span>
+          </div>
+          <button class="btn-logout" @click="handleLogout">Déconnexion</button>
+        </div>
+        <h1>Monitoring Mode</h1>
+        <p>Détection automatique des musiques en continu</p>
+      </header>
+
+      <main>
+        <div class="card" v-if="!isMonitoring">
+          <div class="card-title">
+            <span>⚙️</span> Configuration
+            <button class="settings-toggle" @click="showSettings = !showSettings">{{ showSettings ? 'Cacher' : 'Afficher' }}</button>
+          </div>
+          <div v-if="showSettings" class="settings-grid">
+            <label>Établissement ID *
+              <input v-model="config.etablissementId" type="text" placeholder="UUID de l'établissement" />
+            </label>
+            <div class="message info" v-if="!config.etablissementId">L'identifiant d'établissement est requis pour démarrer.</div>
+          </div>
+        </div>
+
+        <div class="monitoring-hero">
+          <div class="state-badge" :class="monitorState">
+            <span class="pulse-dot"></span>
+            {{ monitorState === 'searching' ? 'RECHERCHE' : monitorState === 'locked' ? 'VERROUILLÉ' : monitorState === 'transition' ? 'ANALYSE EN COURS...' : 'INACTIF' }}
+          </div>
+          <div class="session-timer">{{ formatHMS(sessionDuration) }}</div>
+          <div class="session-label">Durée de la soirée</div>
+          
+          <button 
+            class="btn-monitor" 
+            :class="isMonitoring ? 'stop' : 'start'"
+            @click="toggleMonitoring"
+            :disabled="!canToggleMonitoring"
+          >
+            <template v-if="!isMonitoring">▶ Démarrer le monitoring</template>
+            <template v-else>⏹ Arrêter la soirée</template>
+          </button>
+
+          <div class="status-bar" style="margin-top: 1rem;">
+            <span class="status-dot" :class="{ offline: !isOnline, warning: pendingSyncCount > 0 }"></span>
+            <span>{{ isOnline ? 'En ligne' : 'Hors ligne' }}</span>
+            <span v-if="pendingSyncCount > 0"> - {{ pendingSyncCount }} en attente</span>
+            <span v-if="isMonitoring"> - API: {{ apiCallCount }} req</span>
+          </div>
+        </div>
+
+        <div v-if="currentTrack" class="current-track">
+          <div class="track-header">
+            <div class="track-cover">🎵</div>
+            <div class="track-info">
+              <div class="track-title">{{ currentTrack.titre }}</div>
+              <div class="track-artist">{{ currentTrack.artiste }}</div>
+              <span class="match-badge">{{ (currentTrack.confidence * 100).toFixed(0) }}% match</span>
+            </div>
+          </div>
+          
+          <div class="track-meta">
+            <div class="meta-chip" v-if="currentTrack.album"><span class="lbl">Album:</span>{{ currentTrack.album }}</div>
+            <div class="meta-chip" v-if="currentTrack.genre"><span class="lbl">Genre:</span>{{ currentTrack.genre }}</div>
+            <div class="meta-chip" v-if="currentTrack.label"><span class="lbl">Label:</span>{{ currentTrack.label }}</div>
+            <div class="meta-chip" v-if="currentTrack.isrc"><span class="lbl">ISRC:</span>{{ currentTrack.isrc }}</div>
+          </div>
+
+          <div class="track-elapsed">{{ formatHMS(currentTrackElapsed) }}</div>
+          <div class="track-elapsed-label">En cours depuis</div>
+
+          <div class="analysis-grid">
+            <div class="analysis-item">
+              <div class="analysis-label">
+                <span>Stabilité spectrale</span>
+                <span>{{ (spectralStability * 100).toFixed(0) }}%</span>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-fill" :class="spectralStabilityClass" :style="{ width: (spectralStability * 100) + '%' }"></div>
+              </div>
+            </div>
+            <div class="analysis-item">
+              <div class="analysis-label">
+                <span>Requêtes API</span>
+                <span>{{ apiCallCount }}</span>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-fill good" :style="{ width: '100%' }"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="isMonitoring" class="card" style="padding: .8rem;">
+          <div class="waveform-container">
+            <canvas ref="waveformCanvas"></canvas>
+            <div class="waveform-indicator"><span class="rec-dot"></span> LIVE</div>
+          </div>
+        </div>
+
+        <div v-if="pendingSyncCount > 0" class="sync-banner">
+          <span>⏳</span>
+          <div>{{ pendingSyncCount }} capture(s) en attente de synchronisation</div>
+        </div>
+        <div v-else-if="isMonitoring && isOnline" class="sync-banner ok">
+          <span>✅</span>
+          <div>Données synchronisées</div>
+        </div>
+
+        <div v-if="errorMessage" class="message error"><span>❌</span><div>{{ errorMessage }}</div></div>
+
+        <div class="card">
+          <div class="card-title">
+            <span>📜</span> Historique
+            <span style="margin-left:auto; font-size:.8rem; color:var(--text-muted); font-weight:400;">{{ eveningHistory.length }} titre(s)</span>
+          </div>
+          
+          <div v-if="eveningHistory.length === 0" class="history-empty">
+            Aucune musique détectée pour l'instant.<br/>
+            <span style="font-size:.75rem;">L'historique apparaîtra ici en temps réel.</span>
+          </div>
+          
+          <div v-else class="history-list">
+            <div v-for="track in eveningHistory" :key="track.id" class="history-item">
+              <div class="history-time">{{ formatTime(track.detectedAt) }}</div>
+              <div class="history-info">
+                <div class="history-title">{{ track.titre }}</div>
+                <div class="history-artist">{{ track.artiste }}</div>
+                <span class="history-method">{{ track.detectionMethod === 'local_change' ? '🎯 Changement' : track.detectionMethod === 'search_change' ? '🔍 Changement' : '🔍 Initial' }}</span>
+              </div>
+              <div class="history-duration">
+                <div>{{ track.endedAt ? formatHMS(track.durationSeconds) : '▶ En cours' }}</div>
+                <div style="font-size:.65rem; color:var(--text-muted);">
+                  {{ track.synced ? '✓ Sync' : '⏳ Local' }}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button v-if="eveningHistory.length > 0" class="btn-export" @click="exportHistory">
+            📥 Exporter l'historique (JSON)
+          </button>
+        </div>
+      </main>
+    </template>
+  </div>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script>
+    const { createApp, ref, reactive, computed, onMounted, onUnmounted, nextTick } = Vue;
+
+    // ===== UTILS =====
+    const formatHMS = (s) => {
+      if (!s || s < 0) s = 0;
+      s = Math.floor(s);
+      const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+      if (h > 0) return h + ':' + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+      return String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+    };
+
+    const formatTime = (iso) => {
+      if (!iso) return '--:--';
+      const d = new Date(iso);
+      return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    };
+
+    const formatCountdown = (s) => {
+      if (!s || s < 0) s = 0;
+      const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+      return m + ':' + String(sec).padStart(2,'0');
+    };
+
+    const getInitials = (email) => {
+      if (!email) return '?';
+      const parts = email.split('@')[0].split(/[.\-_]/);
+      return parts.map(p => p[0] ? p[0].toUpperCase() : '').slice(0,2).join('') || '?';
+    };
+
+    // ===== STORAGE =====
+    const authStorage = {
+      getTokens: () => {
+        try {
+          const raw = localStorage.getItem('hmi_auth');
+          if (!raw) return null;
+          const parsed = JSON.parse(raw);
+          if (parsed.accessToken && parsed.expiresAt && Date.now() > parsed.expiresAt) {
+            return Object.assign({}, parsed, { expired: true });
+          }
+          return parsed;
+        } catch (e) { return null; }
+      },
+      setTokens: (tokens, expiresInMs) => {
+        expiresInMs = expiresInMs || 15 * 60 * 1000;
+        const data = {
+          accessToken: tokens.accessToken, refreshToken: tokens.refreshToken,
+          user: tokens.user, expiresAt: Date.now() + expiresInMs
+        };
+        localStorage.setItem('hmi_auth', JSON.stringify(data));
+      },
+      clear: () => localStorage.removeItem('hmi_auth'),
+      getUser: () => {
+        const t = authStorage.getTokens();
+        return t ? t.user : null;
+      }
+    };
+
+    const eveningStorage = {
+      KEY: 'hmi_evening_session',
+      load: () => {
+        try {
+          const raw = localStorage.getItem(eveningStorage.KEY);
+          return raw ? JSON.parse(raw) : null;
+        } catch (e) { return null; }
+      },
+      save: (session) => {
+        try { localStorage.setItem(eveningStorage.KEY, JSON.stringify(session)); } catch (e) {}
+      },
+      clear: () => localStorage.removeItem(eveningStorage.KEY)
+    };
+
+    // ===== SPECTRAL ANALYZER (Offline-First Core) =====
+    class SpectralAnalyzer {
+      constructor() {
+        this.bands = 32;
+        this.similarityThreshold = 0.96;
+        this.consecutiveRequired = 1;
+        this.spectrumHistory = [];
+        this.referenceSpectrum = null;
+        this.referenceEnergy = null;
+        this.lastSpectrum = null;
+        this.consecutiveLowSimilarity = 0;
+        this.maxHistorySize = 12;
+        this.referenceWindowSize = 6;
+        this.recentWindowSize = 2;
+        this.silenceThreshold = 0.025;
+        this.silenceFramesRequired = 4;
+        this.silenceFrames = 0;
+        this.changeThreshold = 45;
+        this.suspicionThreshold = 28;
+      }
+
+      analyze(analyserNode) {
+        const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
+        analyserNode.getByteFrequencyData(dataArray);
+        const result = new Float32Array(this.bands);
+        const binSize = Math.max(1, Math.floor(dataArray.length / this.bands));
+        let totalEnergy = 0;
+
+        for (let i = 0; i < dataArray.length; i++) {
+          totalEnergy += dataArray[i] / 255;
+        }
+
+        for (let i = 0; i < this.bands; i++) {
+          let sum = 0;
+          for (let j = 0; j < binSize; j++) {
+            const index = i * binSize + j;
+            if (index < dataArray.length) sum += dataArray[index];
+          }
+          result[i] = sum / binSize / 255;
+        }
+
+        return {
+          spectrum: result,
+          energy: totalEnergy / dataArray.length,
+          flux: 0
+        };
+      }
+
+      addSample(sample) {
+        const normalized = sample && sample.spectrum ? sample : {
+          spectrum: sample,
+          energy: this.calculateEnergy(sample),
+          flux: 0
+        };
+        normalized.flux = this.lastSpectrum
+          ? this.calculateSpectralFlux(this.lastSpectrum, normalized.spectrum)
+          : 0;
+
+        if (normalized.energy < this.silenceThreshold) {
+          this.silenceFrames++;
+        } else {
+          this.silenceFrames = 0;
+        }
+
+        this.lastSpectrum = Float32Array.from(normalized.spectrum);
+        this.spectrumHistory.push(normalized);
+        if (this.spectrumHistory.length > this.maxHistorySize) {
+          this.spectrumHistory.shift();
+        }
+      }
+
+      getAverageSpectrum(limit) {
+        if (this.spectrumHistory.length === 0) return null;
+        const window = this.spectrumHistory.slice(-(limit || this.referenceWindowSize));
+        const avg = new Float32Array(window[0].spectrum.length);
+        for (let i = 0; i < window.length; i++) {
+          const s = window[i].spectrum;
+          for (let j = 0; j < s.length; j++) avg[j] += s[j];
+        }
+        for (let k = 0; k < avg.length; k++) avg[k] /= window.length;
+        return avg;
+      }
+
+      getAverageEnergy(limit) {
+        const window = this.spectrumHistory.slice(-(limit || this.referenceWindowSize));
+        if (window.length === 0) return null;
+        let sum = 0;
+        for (let i = 0; i < window.length; i++) sum += window[i].energy;
+        return sum / window.length;
+      }
+
+      averageField(window, field) {
+        if (!window || window.length === 0) return 0;
+        let sum = 0;
+        for (let i = 0; i < window.length; i++) sum += window[i][field] || 0;
+        return sum / window.length;
+      }
+
+      calculateEnergy(spectrum) {
+        if (!spectrum || spectrum.length === 0) return 0;
+        let sum = 0;
+        for (let i = 0; i < spectrum.length; i++) sum += spectrum[i];
+        return sum / spectrum.length;
+      }
+
+      calculateSpectralFlux(previous, current) {
+        if (!previous || !current || previous.length !== current.length) return 0;
+        let sum = 0;
+        for (let i = 0; i < current.length; i++) {
+          const diff = Math.max(0, current[i] - previous[i]);
+          sum += diff * diff;
+        }
+        return Math.sqrt(sum / current.length);
+      }
+
+      calculateSpectrumDelta(previous, current) {
+        if (!previous || !current || previous.length !== current.length) return 0;
+        let sum = 0;
+        for (let i = 0; i < current.length; i++) {
+          sum += Math.abs(current[i] - previous[i]);
+        }
+        return sum / current.length;
+      }
+
+      clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+      }
+
+      cosineSimilarity(a, b) {
+        if (!a || !b || a.length !== b.length) return 0;
+        let dot = 0, normA = 0, normB = 0;
+        for (let i = 0; i < a.length; i++) {
+          dot += a[i] * b[i];
+          normA += a[i] * a[i];
+          normB += b[i] * b[i];
+        }
+        if (normA === 0 || normB === 0) return 0;
+        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+      }
+
+      checkForChange() {
+        if (!this.referenceSpectrum || this.spectrumHistory.length < this.recentWindowSize) {
+          return {
+            changed: false,
+            similarity: 1,
+            stability: 1,
+            changeScore: 0,
+            silenceDetected: this.silenceFrames >= this.silenceFramesRequired
+          };
+        }
+        const recentWindow = this.spectrumHistory.slice(-this.recentWindowSize);
+        const currentAvg = new Float32Array(recentWindow[0].spectrum.length);
+        for (let i = 0; i < recentWindow.length; i++) {
+          const s = recentWindow[i].spectrum;
+          for (let j = 0; j < s.length; j++) currentAvg[j] += s[j];
+        }
+        for (let k = 0; k < currentAvg.length; k++) currentAvg[k] /= recentWindow.length;
+
+        const similarity = this.cosineSimilarity(this.referenceSpectrum, currentAvg);
+        const spectrumDelta = this.calculateSpectrumDelta(this.referenceSpectrum, currentAvg);
+        const currentEnergy = this.averageField(recentWindow, 'energy');
+        const currentFlux = this.averageField(recentWindow, 'flux');
+        const referenceEnergy = this.referenceEnergy || this.getAverageEnergy();
+        const energyDelta = referenceEnergy
+          ? Math.abs(currentEnergy - referenceEnergy) / Math.max(referenceEnergy, 0.05)
+          : 0;
+
+        const cosineScore = this.clamp((this.similarityThreshold - similarity) / 0.18, 0, 1);
+        const deltaScore = this.clamp(spectrumDelta / 0.08, 0, 1);
+        const spectrumScore = Math.max(cosineScore, deltaScore);
+        const fluxScore = this.clamp((currentFlux - 0.012) / 0.07, 0, 1);
+        const volumeScore = this.clamp(energyDelta / 0.35, 0, 1);
+        const silenceScore = this.silenceFrames >= this.silenceFramesRequired
+          ? 1
+          : this.clamp((this.silenceThreshold * 2 - currentEnergy) / this.silenceThreshold, 0, 1);
+
+        const changeScore = Math.round(
+          spectrumScore * 30 +
+          fluxScore * 30 +
+          volumeScore * 20 +
+          silenceScore * 20
+        );
+        const strongSignals = [spectrumScore, fluxScore, volumeScore, silenceScore]
+          .filter(score => score >= 0.55).length;
+        const stability = this.clamp(1 - (changeScore / 100), 0, 1);
+
+        if (changeScore >= this.changeThreshold ||
+            (changeScore >= this.suspicionThreshold && strongSignals >= 2)) {
+          this.consecutiveLowSimilarity++;
+        } else {
+          this.consecutiveLowSimilarity = Math.max(0, this.consecutiveLowSimilarity - 1);
+        }
+
+        return {
+          changed: this.consecutiveLowSimilarity >= this.consecutiveRequired,
+          similarity: similarity,
+          stability: stability,
+          changeScore: changeScore,
+          silenceDetected: this.silenceFrames >= this.silenceFramesRequired,
+          signals: {
+            spectrum: spectrumScore,
+            flux: fluxScore,
+            volume: volumeScore,
+            silence: silenceScore
+          }
+        };
+      }
+
+      setReference(spectrum) {
+        this.referenceSpectrum = spectrum ? Float32Array.from(spectrum) : null;
+        this.referenceEnergy = this.getAverageEnergy(this.referenceWindowSize);
+        this.consecutiveLowSimilarity = 0;
+        this.silenceFrames = 0;
+      }
+
+      clearReference() {
+        this.referenceSpectrum = null;
+        this.referenceEnergy = null;
+        this.consecutiveLowSimilarity = 0;
+      }
+
+      reset() {
+        this.spectrumHistory = [];
+        this.referenceSpectrum = null;
+        this.referenceEnergy = null;
+        this.lastSpectrum = null;
+        this.consecutiveLowSimilarity = 0;
+        this.silenceFrames = 0;
+      }
+    }
+
+    // ===== APP =====
+    createApp({
+      setup() {
+        // CONSTANTS
+        const ANALYSIS_INTERVAL = 500;
+        const MIN_CONFIDENCE = 0.6;
+        const apiBaseUrl = 'http://localhost:3000/v1';
+
+        // STATE
+        const isAuthenticated = ref(false);
+        const loadingAuth = ref(false);
+        const authError = ref('');
+        const loginForm = reactive({ email: '', password: '' });
+        const user = ref(authStorage.getUser());
+        const userEmail = computed(() => (user.value && (user.value.email || user.value.username)) || 'Utilisateur');
+        const userInitials = computed(() => getInitials(userEmail.value));
+
+        const showSettings = ref(true);
+        const isOnline = ref(navigator.onLine);
+        const errorMessage = ref('');
+        const waveformCanvas = ref(null);
+
+        const config = reactive({
+          etablissementId: localStorage.getItem('hmi_etablissement_id') || ''
+        });
+
+        const isMonitoring = ref(false);
+        const monitorState = ref('idle');
+        const sessionStartTime = ref(null);
+        const sessionDuration = ref(0);
+        const currentTrack = ref(null);
+        const currentTrackStartedAt = ref(null);
+        const currentTrackElapsed = ref(0);
+        const eveningHistory = ref([]);
+        const apiCallCount = ref(0);
+        const pendingSyncCount = ref(0);
+        const spectralStability = ref(1);
+
+        // TIMERS & AUDIO
+        let sessionTimerId = null;
+        let analysisTimerId = null;
+        let searchTimerId = null;
+        let animFrameId = null;
+        let mediaStream = null;
+        let audioContext = null;
+        let analyser = null;
+        let mediaRecorder = null;
+        let firstCaptureReceived = false;
+        let lastAudioBlob = null;
+        let audioChunks = []; // ✅ Correction 5 : accumulation des chunks
+        let isApiCallInProgress = false;
+        let lastApiCallTime = 0;
+        let pendingApiTrigger = null;
+        const analyzer = new SpectralAnalyzer();
+
+        // COMPUTED
+        const canToggleMonitoring = computed(() => !!config.etablissementId);
+        const spectralStabilityClass = computed(() => {
+          if (spectralStability.value > 0.7) return 'good';
+          if (spectralStability.value > 0.4) return 'warning';
+          return 'danger';
+        });
+
+        // PERSISTENCE
+        const saveConfig = () => { localStorage.setItem('hmi_etablissement_id', config.etablissementId); };
+        
+        const saveEveningSession = () => {
+          const session = {
+            sessionId: sessionStartTime.value ? 'night_' + sessionStartTime.value : null,
+            startTime: sessionStartTime.value,
+            tracks: eveningHistory.value
+          };
+          eveningStorage.save(session);
+        };
+
+        const loadEveningSession = () => {
+          const session = eveningStorage.load();
+          if (session && session.tracks) {
+            eveningHistory.value = session.tracks;
+            pendingSyncCount.value = session.tracks.filter(t => !t.synced).length;
+          }
+        };
+
+        const getAuthHeader = () => {
+          const tokens = authStorage.getTokens();
+          return tokens && tokens.accessToken ? { 'Authorization': 'Bearer ' + tokens.accessToken } : {};
+        };
+
+        // API CLIENT
+        const api = {
+          login: (email, password) => {
+            return fetch(apiBaseUrl + '/auth/login', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email, password })
+            }).then(res => {
+              if (!res.ok) throw new Error(res.status === 401 ? 'Identifiants invalides' : (res.status === 403 ? 'Compte bloqué' : 'Erreur ' + res.status));
+              return res.json();
+            }).then(data => {
+              authStorage.setTokens({
+                accessToken: data.accessToken, refreshToken: data.refreshToken,
+                user: data.user || { email, username: email }
+              });
+              return data;
+            });
+          },
+          refreshAccessToken: () => {
+            const tokens = authStorage.getTokens();
+            if (!tokens || !tokens.refreshToken) throw new Error('No refresh token');
+            return fetch(apiBaseUrl + '/auth/refresh', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refreshToken: tokens.refreshToken })
+            }).then(res => {
+              if (!res.ok) { authStorage.clear(); throw new Error('Refresh failed'); }
+              return res.json();
+            }).then(data => {
+              authStorage.setTokens({
+                accessToken: data.accessToken, refreshToken: data.refreshToken || tokens.refreshToken, user: tokens.user
+              });
+              return data;
+            });
+          },
+          identify: (audioBlob) => {
+            const formData = new FormData();
+            formData.append('audio', audioBlob, 'capture_' + Date.now() + '.webm');
+            formData.append('etablissementId', config.etablissementId);
+            formData.append('duree', '15');
+            formData.append('capturedAt', new Date().toISOString());
+            return fetch(apiBaseUrl + '/audio/capturer', {
+              method: 'POST', headers: getAuthHeader(), body: formData
+            }).then(res => {
+              if (!res.ok) {
+                if (res.status === 401) { 
+                  return api.refreshAccessToken().then(() => { 
+                    throw new Error('Session expirée, nouvelle tentative...'); 
+                  }).catch(() => { 
+                    handleLogout(); 
+                    throw new Error('Session expirée'); 
+                  });
+                }
+                throw new Error('API ' + res.status);
+              }
+              apiCallCount.value++;
+              lastApiCallTime = Date.now();
+              return res.json();
+            });
+          },
+          syncBatch: (captures) => {
+            if (!captures || captures.length === 0) return Promise.resolve();
+            return fetch(apiBaseUrl + '/audio/sync', {
+              method: 'POST', headers: Object.assign({}, getAuthHeader(), { 'Content-Type': 'application/json' }),
+              body: JSON.stringify({ captures })
+            }).then(res => {
+              if (!res.ok) throw new Error('Sync ' + res.status);
+              return res.json();
+            });
+          }
+        };
+
+        // TRACK MANAGEMENT
+        const isDuplicateTrack = (newTrack) => {
+          if (!newTrack) return false;
+          const last = eveningHistory.value[eveningHistory.value.length - 1];
+          if (!last) return false;
+          if (newTrack.isrc && last.isrc && newTrack.isrc === last.isrc) return true;
+          if (newTrack.titre && last.titre && newTrack.artiste && last.artiste &&
+              newTrack.titre.toLowerCase() === last.titre.toLowerCase() &&
+              newTrack.artiste.toLowerCase() === last.artiste.toLowerCase()) return true;
+          return false;
+        };
+
+        const addTrackToHistory = (track, detectionMethod) => {
+          if (isDuplicateTrack(track)) {
+            const last = eveningHistory.value[eveningHistory.value.length - 1];
+            if (last && !last.endedAt) {
+              last.endedAt = new Date().toISOString();
+              last.durationSeconds = Math.floor((new Date(last.endedAt).getTime() - new Date(last.detectedAt).getTime()) / 1000);
+            }
+            // ✅ Correction 8 : mise à jour immédiate
+            pendingSyncCount.value = eveningHistory.value.filter(t => !t.synced).length;
+            saveEveningSession();
+            return { isDuplicate: true, updatedTrack: eveningHistory.value[eveningHistory.value.length - 1] };
+          }
+          const prev = eveningHistory.value[eveningHistory.value.length - 1];
+          if (prev && !prev.endedAt) {
+            prev.endedAt = new Date().toISOString();
+            prev.durationSeconds = Math.floor((new Date(prev.endedAt).getTime() - new Date(prev.detectedAt).getTime()) / 1000);
+          }
+          const newEntry = {
+            id: (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : Date.now().toString(),
+            titre: track.titre,
+            artiste: track.artiste,
+            album: track.album,
+            genre: track.genre,
+            label: track.label,
+            isrc: track.isrc,
+            confidence: track.confidence,
+            detectedAt: new Date().toISOString(),
+            endedAt: null,
+            durationSeconds: null,
+            detectionMethod: detectionMethod,
+            synced: false
+          };
+          eveningHistory.value.push(newEntry);
+          // ✅ Correction 8 : mise à jour immédiate
+          pendingSyncCount.value = eveningHistory.value.filter(t => !t.synced).length;
+          saveEveningSession();
+          return { isDuplicate: false, newTrack: newEntry };
+        };
+
+        const syncPendingTracks = () => {
+          const unsynced = eveningHistory.value.filter(t => !t.synced);
+          if (unsynced.length === 0) return Promise.resolve();
+          const payload = unsynced.map(t => ({
+            trackId: t.id,
+            titre: t.titre,
+            artiste: t.artiste,
+            album: t.album,
+            genre: t.genre,
+            label: t.label,
+            isrc: t.isrc,
+            confidence: t.confidence,
+            detectedAt: t.detectedAt,
+            endedAt: t.endedAt,
+            durationSeconds: t.durationSeconds,
+            detectionMethod: t.detectionMethod,
+            etablissementId: config.etablissementId
+          }));
+          return api.syncBatch(payload).then(() => {
+            for (let i = 0; i < unsynced.length; i++) {
+              unsynced[i].synced = true;
+            }
+            pendingSyncCount.value = 0;
+            saveEveningSession();
+          }).catch(err => {
+            console.warn('Sync failed:', err);
+            pendingSyncCount.value = eveningHistory.value.filter(t => !t.synced).length;
+          });
+        };
+
+        // AUDIO ENGINE
+        const startAudioCapture = () => {
+          return navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+          }).then(stream => {
+            mediaStream = stream;
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            analyser.smoothingTimeConstant = 0.8;
+            const source = audioContext.createMediaStreamSource(mediaStream);
+            source.connect(analyser);
+
+            const mimeType = 'audio/webm;codecs=opus';
+            
+            mediaRecorder = new window.MediaRecorder(mediaStream, { mimeType });
+            
+            // ✅ Correction 5 : accumulation des chunks pour 15s d'audio
+            mediaRecorder.ondataavailable = (e) => {
+              if (!e.data || e.data.size === 0) return;
+              
+              audioChunks.push(e.data);
+              console.log("Chunk reçu:", e.data.size, "octets - Total chunks:", audioChunks.length);
+              
+              // Après 3 chunks de 5s = 15s d'audio consolidé
+              if (audioChunks.length >= 3) {
+                lastAudioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                audioChunks = [];
+                console.log("📦 Blob consolidé:", lastAudioBlob.size, "octets");
+                
+                if (!firstCaptureReceived) {
+                  firstCaptureReceived = true;
+                  console.log("🎯 Premier blob consolidé reçu -> lancement identification");
+                  performApiCheck('initial');
+                } else if (pendingApiTrigger && !isApiCallInProgress) {
+                  const trigger = pendingApiTrigger;
+                  pendingApiTrigger = null;
+                  console.log('🎯 Blob post-changement prêt -> lancement identification:', trigger);
+                  performApiCheck(trigger);
+                }
+              }
+            };
+            
+            // ✅ Correction 4 : MediaRecorder simple avec chunks de 5s
+            mediaRecorder.start(5000);
+
+            analysisTimerId = setInterval(runLocalAnalysis, ANALYSIS_INTERVAL);
+
+            return nextTick();
+          }).then(() => {
+            drawWaveform();
+          }).catch(err => {
+            errorMessage.value = 'Micro indisponible: ' + err.message;
+            throw err;
+          });
+        };
+
+        const stopAudioCapture = () => {
+          if (analysisTimerId) { clearInterval(analysisTimerId); analysisTimerId = null; }
+          if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
+          if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            try { mediaRecorder.stop(); } catch (e) {}
+          }
+          if (mediaStream) {
+            const tracks = mediaStream.getTracks();
+            for (let i = 0; i < tracks.length; i++) tracks[i].stop();
+            mediaStream = null;
+          }
+          if (audioContext) {
+            audioContext.close().catch(() => {});
+            audioContext = null;
+          }
+          analyser = null;
+          audioChunks = [];
+        };
+
+        const closeOpenHistoryTrack = () => {
+          const last = eveningHistory.value[eveningHistory.value.length - 1];
+          if (last && !last.endedAt) {
+            last.endedAt = new Date().toISOString();
+            last.durationSeconds = Math.floor((new Date(last.endedAt).getTime() - new Date(last.detectedAt).getTime()) / 1000);
+            pendingSyncCount.value = eveningHistory.value.filter(t => !t.synced).length;
+            saveEveningSession();
+          }
+        };
+
+        const setCurrentAudioReference = () => {
+          const refSpectrum = analyzer.getAverageSpectrum();
+          if (refSpectrum) analyzer.setReference(refSpectrum);
+        };
+
+        // ===== CORE LOGIC: OFFLINE-FIRST TRIGGER =====
+        const runLocalAnalysis = () => {
+          if (!analyser || !isMonitoring.value) return;
+          const sample = analyzer.analyze(analyser);
+          analyzer.addSample(sample);
+
+          // ✅ Correction 2 : analyse aussi en mode searching
+          if (monitorState.value === 'locked' || monitorState.value === 'searching') {
+            const result = analyzer.checkForChange();
+            spectralStability.value = result.stability;
+
+            if (monitorState.value === 'locked' && result.silenceDetected) {
+              console.log('Silence détecté, retour en recherche...');
+              closeOpenHistoryTrack();
+              currentTrack.value = null;
+              currentTrackStartedAt.value = null;
+              currentTrackElapsed.value = 0;
+              lastAudioBlob = null;
+              audioChunks = [];
+              firstCaptureReceived = false;
+              pendingApiTrigger = null;
+              analyzer.clearReference();
+              monitorState.value = 'searching';
+            }
+            // TRIGGER 1: Local multi-signal change detected (seulement en mode locked)
+            else if (monitorState.value === 'locked' && result.changed && !isApiCallInProgress && !pendingApiTrigger) {
+              console.log('Changement audio suspecté, score:', result.changeScore, result.signals);
+              pendingApiTrigger = 'local_change';
+              lastAudioBlob = null;
+              audioChunks = [];
+              monitorState.value = 'transition';
+            } 
+            else if (monitorState.value === 'searching' && result.changed && !isApiCallInProgress && !pendingApiTrigger) {
+              console.log('Changement audio en recherche, score:', result.changeScore, result.signals);
+              pendingApiTrigger = 'search_change';
+              lastAudioBlob = null;
+              audioChunks = [];
+              monitorState.value = 'transition';
+            }
+          }
+        };
+
+        const performApiCheck = (triggerMethod) => {
+          console.log("performApiCheck", triggerMethod, "state:", monitorState.value, "blob:", !!lastAudioBlob);
+          
+          if (isApiCallInProgress) {
+            return Promise.resolve();
+          }
+
+          if (!lastAudioBlob) {
+            console.log("En attente du premier blob consolidé...");
+            monitorState.value = 'searching';
+            return Promise.resolve();
+          }
+          
+          isApiCallInProgress = true;
+          console.log("Envoi API", lastAudioBlob.size, "octets");
+          
+          return api.identify(lastAudioBlob).then(response => {
+            console.log("Réponse API :", response);
+            
+            if (!response || !response.success) {
+              // ✅ Correction 1 : retour en searching si pas de réponse
+              console.log('❌ API a échoué, retour en recherche');
+              currentTrack.value = null;
+              currentTrackStartedAt.value = null;
+              setCurrentAudioReference();
+              monitorState.value = 'searching';
+              return;
+            }
+            
+            if (response.duplicate) {
+              console.log('✅ Backend confirme: même musique (doublon ignoré)');
+              const refSpectrum = analyzer.getAverageSpectrum();
+              analyzer.setReference(refSpectrum);
+              monitorState.value = 'locked';
+              return;
+            }
+            
+            if (response.rejected && response.reason === 'low_confidence') {
+              console.log('⚠️ Backend rejeté: confiance trop faible');
+              // ✅ Correction 1 : retour en searching
+              currentTrack.value = null;
+              currentTrackStartedAt.value = null;
+              setCurrentAudioReference();
+              monitorState.value = 'searching';
+              return;
+            }
+            
+            // ✅ Correction 1 : CRITIQUE - retour en searching si pas de musique trouvée
+            if (response.statut !== 'identified' || !response.resultat) {
+              console.log('ℹ️ Pas de correspondance trouvée, retour en recherche');
+              currentTrack.value = null;
+              currentTrackStartedAt.value = null;
+              setCurrentAudioReference();
+              monitorState.value = 'searching';
+              return;
+            }
+            
+            if (response.resultat.confidence < MIN_CONFIDENCE) {
+              console.log('⚠️ Frontend rejeté: confiance trop faible (' + response.resultat.confidence + ')');
+              currentTrack.value = null;
+              currentTrackStartedAt.value = null;
+              setCurrentAudioReference();
+              monitorState.value = 'searching';
+              return;
+            }
+            
+            // NEW TRACK CONFIRMED
+            const track = Object.assign({}, response.resultat, { 
+              confidence: response.resultat.confidence || 0.85 
+            });
+            
+            console.log('🎵 Nouvelle musique confirmée:', track.titre);
+            const res = addTrackToHistory(track, triggerMethod);
+            transitionToLocked(track);
+            
+            if (!res.isDuplicate && isOnline.value) {
+              setTimeout(syncPendingTracks, 1000);
+            }
+          }).catch(err => {
+            console.warn('API Check failed:', err);
+            // ✅ Correction 1 : retour en searching en cas d'erreur
+            currentTrack.value = null;
+            currentTrackStartedAt.value = null;
+            setCurrentAudioReference();
+            monitorState.value = 'searching';
+          }).finally(() => {
+            isApiCallInProgress = false;
+          });
+        };
+
+        const transitionToLocked = (track) => {
+          monitorState.value = 'locked';
+          currentTrack.value = track;
+          currentTrackStartedAt.value = Date.now();
+          
+          const refSpectrum = analyzer.getAverageSpectrum();
+          analyzer.setReference(refSpectrum);
+        };
+
+        const drawWaveform = () => {
+          if (!waveformCanvas.value || !analyser) return;
+          const canvas = waveformCanvas.value;
+          const ctx = canvas.getContext('2d');
+          canvas.width = canvas.offsetWidth * 2;
+          canvas.height = canvas.offsetHeight * 2;
+          const bufferLength = analyser.frequencyBinCount;
+          const dataArray = new Uint8Array(bufferLength);
+          
+          const draw = () => {
+            if (!isMonitoring.value) return;
+            animFrameId = requestAnimationFrame(draw);
+            analyser.getByteFrequencyData(dataArray);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const barW = canvas.width / bufferLength * 2;
+            let x = 0;
+            for (let i = 0; i < bufferLength; i++) {
+              const h = (dataArray[i] / 255) * canvas.height;
+              const hue = (i / bufferLength) * 60 + 260;
+              ctx.fillStyle = 'hsla(' + hue + ', 80%, 65%, 0.8)';
+              ctx.fillRect(x, canvas.height - h, barW - 1, h);
+              x += barW;
+            }
+          };
+          draw();
+        };
+
+        // CONTROLS
+        const toggleMonitoring = () => {
+          if (isMonitoring.value) {
+            stopMonitoring();
+            return Promise.resolve();
+          } else {
+            return startMonitoring();
+          }
+        };
+
+        const startMonitoring = () => {
+          errorMessage.value = '';
+          saveConfig();
+          
+          loadEveningSession();
+          if (!sessionStartTime.value) {
+            sessionStartTime.value = Date.now();
+            saveEveningSession();
+          }
+          
+          const lastOpen = eveningHistory.value.find(t => !t.endedAt);
+          if (lastOpen) {
+            lastOpen.endedAt = new Date().toISOString();
+            lastOpen.durationSeconds = Math.floor((new Date(lastOpen.endedAt).getTime() - new Date(lastOpen.detectedAt).getTime()) / 1000);
+          }
+
+          firstCaptureReceived = false;
+          lastAudioBlob = null;
+          pendingApiTrigger = null;
+          audioChunks = [];
+
+          return startAudioCapture().then(() => {
+            isMonitoring.value = true;
+            monitorState.value = 'searching';
+            lastApiCallTime = Date.now();
+            
+            sessionTimerId = setInterval(() => {
+              sessionDuration.value = Math.floor((Date.now() - sessionStartTime.value) / 1000);
+              if (currentTrackStartedAt.value) {
+                currentTrackElapsed.value = Math.floor((Date.now() - currentTrackStartedAt.value) / 1000);
+              }
+            }, 1000);
+            sessionDuration.value = Math.floor((Date.now() - sessionStartTime.value) / 1000);
+          }).catch(err => {
+            errorMessage.value = err.message || 'Erreur de démarrage';
+            isMonitoring.value = false;
+            monitorState.value = 'idle';
+          });
+        };
+
+        const stopMonitoring = () => {
+          if (currentTrack.value) {
+            const last = eveningHistory.value[eveningHistory.value.length - 1];
+            if (last && !last.endedAt) {
+              last.endedAt = new Date().toISOString();
+              last.durationSeconds = Math.floor((new Date(last.endedAt).getTime() - new Date(last.detectedAt).getTime()) / 1000);
+            }
+          }
+          
+          stopAudioCapture();
+          
+          if (sessionTimerId) { clearInterval(sessionTimerId); sessionTimerId = null; }
+          if (searchTimerId) { clearInterval(searchTimerId); searchTimerId = null; }
+          
+          isMonitoring.value = false;
+          monitorState.value = 'idle';
+          currentTrack.value = null;
+          currentTrackElapsed.value = 0;
+          spectralStability.value = 1;
+          analyzer.reset();
+          
+          saveEveningSession();
+          
+          if (isOnline.value && pendingSyncCount.value > 0) {
+            setTimeout(syncPendingTracks, 500);
+          }
+          
+          sessionStartTime.value = null;
+          sessionDuration.value = 0;
+        };
+
+        const exportHistory = () => {
+          const data = {
+            exportedAt: new Date().toISOString(),
+            etablissementId: config.etablissementId,
+            session: {
+              startTime: sessionStartTime.value ? new Date(sessionStartTime.value).toISOString() : null,
+              duration: sessionDuration.value,
+              apiCalls: apiCallCount.value,
+              trackCount: eveningHistory.value.length
+            },
+            tracks: eveningHistory.value
+          };
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'songfinder_session_' + new Date().toISOString().slice(0,10) + '.json';
+          a.click();
+          URL.revokeObjectURL(url);
+        };
+
+        const handleLogin = () => {
+          loadingAuth.value = true; authError.value = '';
+          return api.login(loginForm.email, loginForm.password).then(() => {
+            user.value = authStorage.getUser();
+            isAuthenticated.value = true;
+            loginForm.email = ''; loginForm.password = '';
+            loadingAuth.value = false;
+          }).catch(err => { 
+            authError.value = err.message; 
+            loadingAuth.value = false; 
+          });
+        };
+
+        const handleLogout = () => {
+          if (isMonitoring.value) stopMonitoring();
+          authStorage.clear();
+          isAuthenticated.value = false;
+          user.value = null;
+        };
+
+        onMounted(() => {
+          const tokens = authStorage.getTokens();
+          if (tokens && tokens.accessToken && !tokens.expired) {
+            isAuthenticated.value = true;
+            user.value = tokens.user;
+          }
+          window.addEventListener('online', () => {
+            isOnline.value = true;
+            if (isMonitoring.value) setTimeout(syncPendingTracks, 1000);
+          });
+          window.addEventListener('offline', () => { isOnline.value = false; });
+        });
+
+        onUnmounted(() => {
+          if (isMonitoring.value) stopMonitoring();
+        });
+
+        return {
+          isAuthenticated, loadingAuth, authError, loginForm, user, userEmail, userInitials,
+          handleLogin, handleLogout,
+          showSettings, isOnline, errorMessage, waveformCanvas, config,
+          isMonitoring, monitorState, sessionDuration, currentTrack, currentTrackElapsed,
+          eveningHistory, apiCallCount, pendingSyncCount, spectralStability,
+          canToggleMonitoring, spectralStabilityClass,
+          toggleMonitoring, exportHistory,
+          formatHMS, formatTime, formatCountdown
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

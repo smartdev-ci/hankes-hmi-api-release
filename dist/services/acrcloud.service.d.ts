@@ -1,4 +1,4 @@
-interface ACRCloudMetadata {
+export interface ACRCloudMetadata {
     title: string;
     artist: string;
     isrc: string;
@@ -23,10 +23,6 @@ export declare class ACRCloudService {
      * @param filename - Nom du fichier (optionnel)
      */
     identify(audioBuffer: Buffer, filename?: string): Promise<ACRCloudMetadata | null>;
-    /**
-     * Helper pour obtenir la longueur des données du formulaire
-     */
-    private getFormDataLength;
     /**
      * Vérifie si le service est configuré correctement
      */

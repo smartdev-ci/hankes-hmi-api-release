@@ -16,6 +16,7 @@ interface Diffusion {
   duree: number;
   source: 'capture' | 'manual' | 'playlist';
   userId: string | null;
+  captureId: string | null;
   createdAt: Date;
 }
 
@@ -28,6 +29,7 @@ interface DiffusionInsert {
   duree: number;
   source: 'capture' | 'manual' | 'playlist';
   userId?: string | null;
+  captureId?: string | null;
 }
 
 interface DiffusionUpdate {
@@ -39,6 +41,7 @@ interface DiffusionUpdate {
   duree?: number;
   source?: 'capture' | 'manual' | 'playlist';
   userId?: string | null;
+  captureId?: string | null;
 }
 
 export class DiffusionService {

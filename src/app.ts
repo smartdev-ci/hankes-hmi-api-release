@@ -4,21 +4,46 @@ import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
 import routes from './routes';
-import { errorHandler, notFoundHandler, requestLogger } from './middleware';
+import { errorHandler, notFoundHandler, rateLimiter, requestLogger } from './middleware';
 import { config } from './config';
 
 const app: Application = express();
 
+app.disable('x-powered-by');
+
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      baseUri: ["'self'"],
+      frameAncestors: ["'none'"],
+      objectSrc: ["'none'"],
+    },
+  },
+  hsts: config.nodeEnv === 'production'
+    ? { maxAge: 15552000, includeSubDomains: true, preload: true }
+    : false,
+}));
 
 // CORS configuration
+const corsOrigin = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
+  : '*';
+const corsAllowsWildcard = corsOrigin === '*' || (
+  Array.isArray(corsOrigin) &&
+  corsOrigin.length === 1 &&
+  corsOrigin[0] === '*'
+);
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: corsAllowsWildcard ? '*' : corsOrigin,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
+  credentials: !corsAllowsWildcard,
 }));
+
+app.use(rateLimiter(config.rateLimit.windowMs, config.rateLimit.maxRequests));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));

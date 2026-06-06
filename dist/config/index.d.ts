@@ -18,6 +18,20 @@ export declare const config: {
         port: number;
         password: string | undefined;
     };
+    audio: {
+        maxFileSizeBytes: number;
+        minConfidence: number;
+        duplicateWindowMinutes: number;
+    };
+    fingerprint: {
+        fpcalcPath: string;
+        timeoutMs: number;
+        allowHashFallback: boolean;
+    };
+    recognitionCache: {
+        enabled: boolean;
+        ttlSeconds: number;
+    };
     twilio: {
         accountSid: string;
         authToken: string;

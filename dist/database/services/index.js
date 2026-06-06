@@ -4,7 +4,7 @@
  * Utilisant PostgreSQL natif via Prisma ORM
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SupabasePrismaService = exports.ArtisteProfileService = exports.RecenseurProfileService = exports.RapportService = exports.NotificationService = exports.RefreshTokenService = exports.OTPService = exports.DeviceService = exports.DiffusionService = exports.MusicRecognitionService = exports.AudioCaptureService = exports.EtablissementService = exports.UserService = exports.disconnectDatabase = exports.connectDatabase = exports.prisma = void 0;
+exports.SupabasePrismaService = exports.ArtisteProfileService = exports.RecenseurProfileService = exports.RapportService = exports.NotificationService = exports.RefreshTokenService = exports.OTPService = exports.DeviceService = exports.DiffusionService = exports.TrackService = exports.FingerprintRepository = exports.MusicRecognitionService = exports.AudioCaptureService = exports.EtablissementService = exports.UserService = exports.disconnectDatabase = exports.connectDatabase = exports.prisma = void 0;
 // Export du client Prisma et des utilitaires de connexion
 var index_1 = require("../index");
 Object.defineProperty(exports, "prisma", { enumerable: true, get: function () { return index_1.prisma; } });
@@ -19,6 +19,10 @@ var audio_capture_service_1 = require("./audio-capture.service");
 Object.defineProperty(exports, "AudioCaptureService", { enumerable: true, get: function () { return audio_capture_service_1.AudioCaptureService; } });
 var music_recognition_service_1 = require("./music-recognition.service");
 Object.defineProperty(exports, "MusicRecognitionService", { enumerable: true, get: function () { return music_recognition_service_1.MusicRecognitionService; } });
+var fingerprint_service_1 = require("./fingerprint.service");
+Object.defineProperty(exports, "FingerprintRepository", { enumerable: true, get: function () { return fingerprint_service_1.FingerprintRepository; } });
+var track_service_1 = require("./track.service");
+Object.defineProperty(exports, "TrackService", { enumerable: true, get: function () { return track_service_1.TrackService; } });
 var diffusion_service_1 = require("./diffusion.service");
 Object.defineProperty(exports, "DiffusionService", { enumerable: true, get: function () { return diffusion_service_1.DiffusionService; } });
 var device_service_1 = require("./device.service");

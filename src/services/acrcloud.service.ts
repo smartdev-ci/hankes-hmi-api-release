@@ -1,9 +1,9 @@
-import axios from 'axios';
-import crypto from 'crypto';
-import FormData from 'form-data';
-import { config } from '../config';
+import axios from "axios";
+import crypto from "crypto";
+import FormData from "form-data";
+import { config } from "../config";
 
-interface ACRCloudMetadata {
+export interface ACRCloudMetadata {
   title: string;
   artist: string;
   isrc: string;
@@ -49,9 +49,12 @@ export class ACRCloudService {
   /**
    * Génère la signature pour l'authentification ACRCloud
    */
-  private generateSignature(dataBytes: Buffer, timestamp: number): string {
-    const stringToSign = `POST\n/v1/identify\n${this.apiSecret}\n${dataBytes.toString('base64')}\n${timestamp}`;
-    return crypto.createHmac('sha1', this.apiSecret).update(stringToSign).digest('base64');
+  private generateSignature(timestamp: number): string {
+    const stringToSign = `POST\n/v1/identify\n${this.apiKey}\naudio\n1\n${timestamp}`;
+    return crypto
+      .createHmac("sha1", this.apiSecret)
+      .update(stringToSign)
+      .digest("base64");
   }
 
   /**
@@ -59,41 +62,38 @@ export class ACRCloudService {
    * @param audioBuffer - Le buffer du fichier audio
    * @param filename - Nom du fichier (optionnel)
    */
-  async identify(audioBuffer: Buffer, filename: string = 'audio.wav'): Promise<ACRCloudMetadata | null> {
+  async identify(
+    audioBuffer: Buffer,
+    filename: string = "audio.wav",
+  ): Promise<ACRCloudMetadata | null> {
     try {
       if (!this.apiKey || !this.apiSecret) {
-        throw new Error('ACRCloud credentials not configured');
+        throw new Error("ACRCloud credentials not configured");
       }
 
       const timestamp = Math.floor(Date.now() / 1000);
-      const contentType = 'audio/mpeg';
+      const signature = this.generateSignature(timestamp);
 
       // Créer le formulaire multipart
       const formData = new FormData();
-      formData.append('sample', audioBuffer, {
+      formData.append("sample", audioBuffer, {
         filename,
-        contentType,
+        contentType: "audio/mpeg",
       } as any);
-      formData.append('data_type', 'audio');
-      formData.append('signature_version', '1');
-      formData.append('timestamp', timestamp.toString());
-      formData.append('access_key', this.apiKey);
-
-      const dataBytes = await this.getFormDataLength(formData);
-      const signature = this.generateSignature(dataBytes, timestamp);
-      formData.append('signature', signature);
+      formData.append("data_type", "audio");
+      formData.append("signature_version", "1");
+      formData.append("timestamp", timestamp.toString());
+      formData.append("access_key", this.apiKey);
+      formData.append("signature", signature);
 
       // Appel API avec axios
       const response = await axios.post<ACRCloudResponse>(
         this.endpoint,
         formData,
         {
-          headers: {
-            ...((formData as any).getHeaders ? (formData as any).getHeaders() : {}),
-            'Content-Type': 'multipart/form-data',
-          },
+          headers: formData.getHeaders(),
           timeout: 30000, // 30 secondes
-        }
+        },
       );
 
       const result = response.data;
@@ -112,34 +112,19 @@ export class ACRCloudService {
 
       const metadata: ACRCloudMetadata = {
         title: music.title,
-        artist: music.artists?.map(a => a.name).join(', ') || 'Unknown',
-        isrc: music.external_metadata?.isrc || '',
+        artist: music.artists?.map((a) => a.name).join(", ") || "Unknown",
+        isrc: music.external_metadata?.isrc || "",
         confidence: music.score / 100,
         label: music.external_metadata?.label,
         releaseDate: music.external_metadata?.release_date,
-        genres: music.external_metadata?.genre_list?.map(g => g.name),
+        genres: music.external_metadata?.genre_list?.map((g) => g.name),
       };
 
       return metadata;
     } catch (error: any) {
-      console.error('ACRCloud identification error:', error?.message || error);
+      console.error("ACRCloud identification error:", error?.message || error);
       throw new Error(`Failed to identify audio: ${error?.message || error}`);
     }
-  }
-
-  /**
-   * Helper pour obtenir la longueur des données du formulaire
-   */
-  private async getFormDataLength(formData: FormData): Promise<Buffer> {
-    return new Promise((resolve, reject) => {
-      const chunks: Buffer[] = [];
-      // form-data is a stream; collect buffers
-      (formData as any).on('data', (chunk: Buffer) => chunks.push(chunk));
-      (formData as any).on('end', () => resolve(Buffer.concat(chunks)));
-      (formData as any).on('error', reject);
-      // trigger stream
-      (formData as any).pipe?.((() => {}) as any);
-    });
   }
 
   /**

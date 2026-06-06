@@ -5,6 +5,7 @@
 interface MusicRecognition {
     id: string;
     captureId: string;
+    trackId: string | null;
     titre: string;
     artiste: string;
     album: string | null;
@@ -19,6 +20,7 @@ interface MusicRecognition {
 }
 interface MusicRecognitionInsert {
     captureId: string;
+    trackId?: string | null;
     titre: string;
     artiste: string;
     album?: string | null;
@@ -31,6 +33,7 @@ interface MusicRecognitionInsert {
     metadata?: any | null;
 }
 interface MusicRecognitionUpdate {
+    trackId?: string | null;
     titre?: string;
     artiste?: string;
     album?: string | null;
@@ -47,6 +50,7 @@ export declare class MusicRecognitionService {
     static findById(id: string): Promise<MusicRecognition | null>;
     static findByCaptureId(captureId: string): Promise<MusicRecognition | null>;
     static create(data: MusicRecognitionInsert): Promise<MusicRecognition>;
+    static createFromExisting(captureId: string, recognition: Omit<MusicRecognitionInsert, 'captureId'>, source: string): Promise<MusicRecognition>;
     static update(id: string, data: MusicRecognitionUpdate): Promise<MusicRecognition>;
     static delete(id: string): Promise<void>;
     static findByArtiste(artiste: string): Promise<MusicRecognition[]>;

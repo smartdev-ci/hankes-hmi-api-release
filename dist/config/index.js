@@ -30,6 +30,21 @@ exports.config = {
         port: parseInt(process.env.REDIS_PORT || '6379'),
         password: process.env.REDIS_PASSWORD || undefined,
     },
+    // Audio recognition pipeline
+    audio: {
+        maxFileSizeBytes: parseInt(process.env.AUDIO_MAX_FILE_SIZE_BYTES || `${10 * 1024 * 1024}`),
+        minConfidence: parseFloat(process.env.AUDIO_MIN_CONFIDENCE || '0.6'),
+        duplicateWindowMinutes: parseInt(process.env.AUDIO_DUPLICATE_WINDOW_MINUTES || '10'),
+    },
+    fingerprint: {
+        fpcalcPath: process.env.FPCALC_PATH || 'fpcalc',
+        timeoutMs: parseInt(process.env.FINGERPRINT_TIMEOUT_MS || '5000'),
+        allowHashFallback: process.env.FINGERPRINT_ALLOW_HASH_FALLBACK !== 'false',
+    },
+    recognitionCache: {
+        enabled: process.env.MUSIC_RECOGNITION_CACHE_ENABLED !== 'false',
+        ttlSeconds: parseInt(process.env.MUSIC_RECOGNITION_CACHE_TTL_SECONDS || `${24 * 60 * 60}`),
+    },
     // Twilio (OTP SMS)
     twilio: {
         accountSid: process.env.TWILIO_ACCOUNT_SID || '',
@@ -39,8 +54,8 @@ exports.config = {
     // ACRCloud (Music Recognition - Primary)
     acrcloud: {
         apiKey: process.env.ACRCLOUD_API_KEY || '',
-        apiSecret: process.env.ARCLOUD_API_SECRET || '',
-        host: process.env.ARCLOUD_HOST || 'identify-eu-west-1.acrcloud.com',
+        apiSecret: process.env.ACRCLOUD_API_SECRET || '',
+        host: process.env.ACRCLOUD_HOST || 'identify-eu-west-1.acrcloud.com',
     },
     // AudD (Music Recognition - Fallback)
     audd: {

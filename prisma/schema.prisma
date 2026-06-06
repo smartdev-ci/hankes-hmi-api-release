@@ -175,6 +175,7 @@ model AudioCapture {
 model MusicRecognition {
   id        String   @id @default(uuid())
   captureId String   @unique
+  trackId   String?
   titre     String
   artiste   String
   album     String?
@@ -188,11 +189,69 @@ model MusicRecognition {
   createdAt DateTime @default(now())
 
   capture         AudioCapture     @relation(fields: [captureId], references: [id], onDelete: Cascade)
+  track           Track?           @relation(fields: [trackId], references: [id], onDelete: SetNull)
+  fingerprints    Fingerprint[]
   diffusions      Diffusion[]
   artisteMusiques ArtisteMusique[] // NOUVEAU — revendications artistes
 
   @@index([isrc]) // Index simple (non unique) pour le matching
+  @@index([trackId])
   @@map("music_recognitions")
+}
+
+/// Bibliothèque musicale propriétaire construite à partir des reconnaissances
+model Track {
+  id            String   @id @default(uuid())
+  titre         String   @db.VarChar(255)
+  artiste       String   @db.VarChar(255)
+  album         String?  @db.VarChar(255)
+  isrc          String?  @db.VarChar(50)
+  genre         String?  @db.VarChar(255)
+  annee         Int?
+  normalizedKey String   @unique
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  aliases      TrackAlias[]
+  fingerprints Fingerprint[]
+  recognitions MusicRecognition[]
+
+  @@index([isrc])
+  @@index([artiste])
+  @@map("tracks")
+}
+
+/// Variantes orthographiques d'un titre ou d'un artiste
+model TrackAlias {
+  id              String   @id @default(uuid())
+  trackId         String
+  alias           String   @db.VarChar(255)
+  normalizedAlias String
+  createdAt       DateTime @default(now())
+
+  track Track @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@unique([trackId, normalizedAlias])
+  @@index([normalizedAlias])
+  @@map("track_aliases")
+}
+
+/// Empreintes audio associées aux reconnaissances locales
+model Fingerprint {
+  id              String   @id @default(uuid())
+  fingerprint     String   @db.Text
+  fingerprintHash String
+  algorithm       String   @default("sha256_fallback")
+  recognitionId   String
+  trackId         String?
+  createdAt       DateTime @default(now())
+
+  recognition MusicRecognition @relation(fields: [recognitionId], references: [id], onDelete: Cascade)
+  track       Track?           @relation(fields: [trackId], references: [id], onDelete: SetNull)
+
+  @@index([fingerprintHash])
+  @@index([trackId])
+  @@map("fingerprints")
 }
 
 /// Revendication d'une musique par un artiste (matching via nom + ISRC)

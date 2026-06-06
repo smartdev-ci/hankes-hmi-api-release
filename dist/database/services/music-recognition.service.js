@@ -63,6 +63,18 @@ class MusicRecognitionService {
             throw new errors_1.DatabaseError('Erreur lors de la création de la reconnaissance');
         }
     }
+    static async createFromExisting(captureId, recognition, source) {
+        return this.create({
+            ...recognition,
+            captureId,
+            source,
+            metadata: {
+                ...(recognition.metadata || {}),
+                localRecognition: true,
+                originalSource: recognition.source,
+            },
+        });
+    }
     static async update(id, data) {
         try {
             const result = await index_1.prisma.musicRecognition.update({

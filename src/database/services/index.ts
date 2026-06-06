@@ -11,6 +11,8 @@ export { UserService } from './user.service';
 export { EtablissementService } from './etablissement.service';
 export { AudioCaptureService } from './audio-capture.service';
 export { MusicRecognitionService } from './music-recognition.service';
+export { FingerprintRepository } from './fingerprint.service';
+export { TrackService } from './track.service';
 export { DiffusionService } from './diffusion.service';
 export { DeviceService } from './device.service';
 export { OTPService } from './otp.service';

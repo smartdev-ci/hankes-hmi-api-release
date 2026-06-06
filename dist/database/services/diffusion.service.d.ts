@@ -12,6 +12,7 @@ interface Diffusion {
     duree: number;
     source: 'capture' | 'manual' | 'playlist';
     userId: string | null;
+    captureId: string | null;
     createdAt: Date;
 }
 interface DiffusionInsert {
@@ -23,6 +24,7 @@ interface DiffusionInsert {
     duree: number;
     source: 'capture' | 'manual' | 'playlist';
     userId?: string | null;
+    captureId?: string | null;
 }
 interface DiffusionUpdate {
     etablissementId?: string;
@@ -33,6 +35,7 @@ interface DiffusionUpdate {
     duree?: number;
     source?: 'capture' | 'manual' | 'playlist';
     userId?: string | null;
+    captureId?: string | null;
 }
 export declare class DiffusionService {
     static findAll(): Promise<Diffusion[]>;

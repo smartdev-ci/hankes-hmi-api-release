@@ -3,7 +3,7 @@ import hybridRecognitionService from '../../services/hybrid-recognition.service'
 import { AudioCaptureService, FingerprintRepository, MusicRecognitionService, TrackService } from '../../database/services';
 import { DiffusionService } from '../../database/services/diffusion.service';
 import acrcloudService from '../../services/acrcloud.service';
-import fingerprintService from '../../services/fingerprint.service';
+import fingerprintService, { FingerprintResult } from '../../services/fingerprint.service';
 import recognitionCacheService from '../../services/recognition-cache.service';
 
 jest.mock('../../database/services', () => ({
@@ -54,6 +54,42 @@ jest.mock('../../services/recognition-cache.service', () => ({
   },
 }));
 
+const mockedAudioCaptureService = jest.mocked(AudioCaptureService);
+const mockedFingerprintRepository = jest.mocked(FingerprintRepository);
+const mockedMusicRecognitionService = jest.mocked(MusicRecognitionService);
+const mockedTrackService = jest.mocked(TrackService);
+const mockedDiffusionService = jest.mocked(DiffusionService);
+const mockedAcrcloudService = jest.mocked(acrcloudService);
+const mockedFingerprintService = jest.mocked(fingerprintService);
+const mockedRecognitionCacheService = jest.mocked(recognitionCacheService);
+
+jest.mock('../../database/services/diffusion.service', () => ({
+  DiffusionService: {
+    create: jest.fn(),
+  },
+}));
+
+jest.mock('../../services/acrcloud.service', () => ({
+  __esModule: true,
+  default: {
+    identify: jest.fn(),
+  },
+}));
+
+jest.mock('../../services/fingerprint.service', () => ({
+  __esModule: true,
+  default: {
+    generate: jest.fn(),
+  },
+}));
+
+jest.mock('../../services/recognition-cache.service', () => ({
+  __esModule: true,
+  default: {
+    setByFingerprintHash: jest.fn(),
+  },
+}));
+
 describe('HybridRecognitionService', () => {
   const input = {
     captureId: 'capture-1',
@@ -70,10 +106,10 @@ describe('HybridRecognitionService', () => {
   });
 
   it('enregistre une diffusion quand une musique est identifiee via ACRCloud', async () => {
-    const fingerprint = {
+    const fingerprint: FingerprintResult = {
       fingerprint: 'fingerprint',
       fingerprintHash: 'hash',
-      algorithm: 'sha256',
+      algorithm: 'chromaprint',
     };
 
     const metadata = {
@@ -99,15 +135,15 @@ describe('HybridRecognitionService', () => {
       metadata: { ...metadata, fingerprintAlgorithm: fingerprint.algorithm },
     };
 
-    (fingerprintService.generate as jest.Mock).mockResolvedValue(fingerprint);
-    (FingerprintRepository.findRecognitionByHash as jest.Mock).mockResolvedValue(null);
-    (AudioCaptureService.checkDuplicate as jest.Mock).mockResolvedValue({ isDuplicate: false });
-    (acrcloudService.identify as jest.Mock).mockResolvedValue(metadata);
-    (TrackService.upsertFromRecognition as jest.Mock).mockResolvedValue({ id: 'track-1' });
-    (MusicRecognitionService.create as jest.Mock).mockResolvedValue(recognition);
-    (DiffusionService.create as jest.Mock).mockResolvedValue({ id: 'diff-1' });
-    (AudioCaptureService.markAsProcessed as jest.Mock).mockResolvedValue({ id: input.captureId, statut: 'identified' });
-    (recognitionCacheService.setByFingerprintHash as jest.Mock).mockResolvedValue(undefined);
+    mockedFingerprintService.generate.mockResolvedValue(fingerprint);
+    mockedFingerprintRepository.findRecognitionByHash.mockResolvedValue(null);
+    mockedAudioCaptureService.checkDuplicate.mockResolvedValue({ isDuplicate: false });
+    mockedAcrcloudService.identify.mockResolvedValue(metadata);
+    mockedTrackService.upsertFromRecognition.mockResolvedValue({ id: 'track-1' } as any);
+    mockedMusicRecognitionService.create.mockResolvedValue(recognition as any);
+    mockedDiffusionService.create.mockResolvedValue({ id: 'diff-1' } as any);
+    mockedAudioCaptureService.markAsProcessed.mockResolvedValue({ id: input.captureId, statut: 'identified' } as any);
+    mockedRecognitionCacheService.setByFingerprintHash.mockResolvedValue(undefined);
 
     const result = await hybridRecognitionService.processCapture(input);
 
@@ -128,13 +164,14 @@ describe('HybridRecognitionService', () => {
   });
 
   it('enregistre une diffusion quand une musique est identifiee localement', async () => {
-    const fingerprint = {
+    const fingerprint: FingerprintResult = {
       fingerprint: 'fingerprint',
       fingerprintHash: 'hash',
-      algorithm: 'sha256',
+      algorithm: 'sha256_fallback',
     };
 
     const localRecognition = {
+      id: 'cached-recog-1',
       trackId: 'track-2',
       titre: 'Titre Local',
       artiste: 'Artiste Local',
@@ -164,17 +201,17 @@ describe('HybridRecognitionService', () => {
       metadata: localRecognition.metadata,
     };
 
-    (fingerprintService.generate as jest.Mock).mockResolvedValue(fingerprint);
-    (FingerprintRepository.findRecognitionByHash as jest.Mock).mockResolvedValue({
+    mockedFingerprintService.generate.mockResolvedValue(fingerprint);
+    mockedFingerprintRepository.findRecognitionByHash.mockResolvedValue({
       source: 'database',
       recognition: localRecognition,
     });
-    (AudioCaptureService.checkDuplicate as jest.Mock).mockResolvedValue({ isDuplicate: false });
-    (TrackService.findById as jest.Mock).mockResolvedValue({ id: localRecognition.trackId });
-    (MusicRecognitionService.createFromExisting as jest.Mock).mockResolvedValue(recognition);
-    (DiffusionService.create as jest.Mock).mockResolvedValue({ id: 'diff-2' });
-    (AudioCaptureService.markAsProcessed as jest.Mock).mockResolvedValue({ id: input.captureId, statut: 'identified' });
-    (recognitionCacheService.setByFingerprintHash as jest.Mock).mockResolvedValue(undefined);
+    mockedAudioCaptureService.checkDuplicate.mockResolvedValue({ isDuplicate: false });
+    mockedTrackService.findById.mockResolvedValue({ id: localRecognition.trackId } as any);
+    mockedMusicRecognitionService.createFromExisting.mockResolvedValue(recognition as any);
+    mockedDiffusionService.create.mockResolvedValue({ id: 'diff-2' } as any);
+    mockedAudioCaptureService.markAsProcessed.mockResolvedValue({ id: input.captureId, statut: 'identified' } as any);
+    mockedRecognitionCacheService.setByFingerprintHash.mockResolvedValue(undefined);
 
     const result = await hybridRecognitionService.processCapture(input);
 

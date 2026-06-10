@@ -36,7 +36,7 @@ export class RecognitionCacheService {
     });
 
     this.redis.on('error', (error) => {
-      console.warn('[RecognitionCache] Redis unavailable:', error.message);
+      return;
     });
   }
 

@@ -36,6 +36,26 @@ const upload = multer({
 });
 
 
+// ===== LOGGER UTILITY =====
+/**
+ * Log explicite pour les erreurs 400 (validation) avec contexte complet
+ */
+const logValidationError = (
+  endpoint: string,
+  userId: string,
+  fieldName: string,
+  reason: string,
+  receivedValue?: any
+) => {
+  const timestamp = new Date().toISOString();
+  const receivedDisplay = receivedValue !== undefined ? ` (reçu: ${JSON.stringify(receivedValue)})` : '';
+  console.error(
+    `[VALIDATION_ERROR] [${timestamp}] [${endpoint}] User: ${userId} | ` +
+    `Missing/Invalid: ${fieldName} | Reason: ${reason}${receivedDisplay}`
+  );
+};
+
+
 // ===== HELPERS =====
 
 
@@ -138,12 +158,45 @@ router.post('/capturer', authenticate, upload.single('audio'), async (req, res) 
   try {
     const { etablissementId, deviceId } = req.body;
     const audioFile = req.file;
+    const userId = req.user!.id;
 
+    // ===== VALIDATION 1: Fichier audio =====
     if (!audioFile?.buffer) {
-      return res.status(400).json({ success: false, error: 'Fichier audio requis' });
+      logValidationError(
+        '/capturer',
+        userId,
+        'audioFile',
+        'Fichier audio manquant ou vide',
+        {
+          filePresent: !!audioFile,
+          bufferPresent: !!audioFile?.buffer,
+          receivedFileName: audioFile?.originalname
+        }
+      );
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Fichier audio requis',
+        details: 'Aucun fichier audio fourni dans la requête'
+      });
     }
+
+    // ===== VALIDATION 2: etablissementId =====
     if (!etablissementId) {
-      return res.status(400).json({ success: false, error: 'etablissementId requis' });
+      logValidationError(
+        '/capturer',
+        userId,
+        'etablissementId',
+        'Identifiant établissement manquant',
+        {
+          bodyKeys: Object.keys(req.body),
+          receivedValue: etablissementId
+        }
+      );
+      return res.status(400).json({ 
+        success: false, 
+        error: 'etablissementId requis',
+        details: 'L\'identifiant de l\'établissement doit être fourni dans le body'
+      });
     }
 
     // Mémoriser capturedAt pour l'utiliser aussi dans la diffusion
@@ -152,7 +205,7 @@ router.post('/capturer', authenticate, upload.single('audio'), async (req, res) 
     // 1. Créer la capture initiale
     let capture = await AudioCaptureService.create({
       etablissementId,
-      userId: req.user!.id,
+      userId,
       audioUrl: `memory://${audioFile.originalname}`,
       duree: Number(req.body.duree || 0),
       format: audioFile.mimetype,
@@ -167,7 +220,7 @@ router.post('/capturer', authenticate, upload.single('audio'), async (req, res) 
       const recognitionResult = await hybridRecognitionService.processCapture({
         captureId: capture.id,
         etablissementId,
-        userId: req.user!.id,
+        userId,
         audioBuffer: audioFile.buffer,
         filename: audioFile.originalname,
         capturedAt,
@@ -206,9 +259,44 @@ router.post('/capturer', authenticate, upload.single('audio'), async (req, res) 
 router.post('/sync', authenticate, async (req, res) => {
   try {
     const { captures } = req.body;
+    const userId = req.user!.id;
 
-    if (!Array.isArray(captures) || captures.length === 0) {
-      return res.status(400).json({ success: false, error: 'Le batch de captures ne peut pas etre vide' });
+    // ===== VALIDATION 1: Array de captures =====
+    if (!Array.isArray(captures)) {
+      logValidationError(
+        '/sync',
+        userId,
+        'captures',
+        'Format invalide: doit être un array',
+        {
+          receivedType: typeof captures,
+          receivedValue: captures
+        }
+      );
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Le paramètre captures doit être un array',
+        details: 'Envoyez { "captures": [...] }'
+      });
+    }
+
+    // ===== VALIDATION 2: Array non vide =====
+    if (captures.length === 0) {
+      logValidationError(
+        '/sync',
+        userId,
+        'captures',
+        'Array vide rejeté',
+        {
+          arrayLength: 0,
+          reason: 'Aucune capture à synchroniser'
+        }
+      );
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Le batch de captures ne peut pas etre vide',
+        details: 'Fournissez au moins une capture à synchroniser'
+      });
     }
 
     const resultats: any[] = [];
@@ -216,11 +304,20 @@ router.post('/sync', authenticate, async (req, res) => {
     let ignoredLowConfidence = 0;
     let ignoredDuplicate = 0;
 
+    console.log(
+      `[SYNC] Début de synchronisation pour l'utilisateur ${userId} | ` +
+      `${captures.length} capture(s) à traiter`
+    );
+
     // Traiter séquentiellement pour bien gérer les doublons en cascade
     for (const batch of captures) {
       try {
         const etablissementId = batch.etablissementId;
         if (!etablissementId) {
+          console.warn(
+            `[SYNC] [SKIP] User: ${userId} | ` +
+            `Missing etablissementId | trackId: ${batch.localId || batch.trackId}`
+          );
           resultats.push({
             localId: batch.localId || batch.trackId,
             status: 'error',
@@ -232,8 +329,9 @@ router.post('/sync', authenticate, async (req, res) => {
         // 1. Filtrer par confiance
         if (!batch.confidence || batch.confidence < MIN_CONFIDENCE_THRESHOLD) {
           console.log(
-            `[SYNC] Ignorée (confiance ${batch.confidence}):`,
-            `${batch.titre} - ${batch.artiste}`
+            `[SYNC] [LOW_CONFIDENCE] User: ${userId} | ` +
+            `Confidence: ${batch.confidence} (seuil: ${MIN_CONFIDENCE_THRESHOLD}) | ` +
+            `Track: "${batch.titre}" - "${batch.artiste}"`
           );
           ignoredLowConfidence++;
           resultats.push({
@@ -255,7 +353,10 @@ router.post('/sync', authenticate, async (req, res) => {
 
         if (duplicateCheck.isDuplicate) {
           console.log(
-            `[SYNC] Doublon ignoré: "${batch.titre}" (existe: ${duplicateCheck.existingId})`
+            `[SYNC] [DUPLICATE] User: ${userId} | ` +
+            `Track: "${batch.titre}" - "${batch.artiste}" | ` +
+            `Window: ${DUPLICATE_WINDOW_MINUTES}min | ` +
+            `Existing captureId: ${duplicateCheck.existingId}`
           );
           ignoredDuplicate++;
           resultats.push({
@@ -272,7 +373,7 @@ router.post('/sync', authenticate, async (req, res) => {
 
         const capture = await AudioCaptureService.create({
           etablissementId,
-          userId: req.user!.id,
+          userId,
           audioUrl: batch.audioUrl || `offline://${batch.localId || Date.now()}`,
           duree: Number(batch.duree || 0),
           format: batch.format || 'unknown',
@@ -335,7 +436,7 @@ router.post('/sync', authenticate, async (req, res) => {
             playedAt: capturedAt,
             duree:    Number(batch.duree || 0),
             source:   'capture',
-            userId:   req.user!.id,
+            userId,
             captureId: capture.id,
           });
         }
@@ -348,7 +449,11 @@ router.post('/sync', authenticate, async (req, res) => {
         });
 
       } catch (itemError: any) {
-        console.error('[SYNC] Erreur sur item:', itemError);
+        console.error(
+          `[SYNC] [ERROR] User: ${userId} | ` +
+          `localId: ${batch.localId || batch.trackId} | ` +
+          `Error: ${itemError.message}`
+        );
         resultats.push({
           localId: batch.localId || batch.trackId,
           status: 'error',
@@ -358,7 +463,8 @@ router.post('/sync', authenticate, async (req, res) => {
     }
 
     console.log(
-      `[SYNC] ✅ Terminé: ${createdCount} créées, ${ignoredLowConfidence} faible confiance, ${ignoredDuplicate} doublons`
+      `[SYNC] ✅ Terminé pour user ${userId} | ` +
+      `${createdCount} créée(s), ${ignoredLowConfidence} faible confiance, ${ignoredDuplicate} doublons`
     );
 
     return res.status(202).json({
@@ -397,9 +503,27 @@ router.get('/statut/:captureId', authenticate, async (req, res) => {
 router.get('/soiree/stats', authenticate, async (req, res) => {
   try {
     const { etablissementId, date } = req.query;
+    const userId = req.user!.id;
 
+    // ===== VALIDATION: etablissementId =====
     if (!etablissementId) {
-      return res.status(400).json({ success: false, error: 'etablissementId requis' });
+      logValidationError(
+        '/soiree/stats',
+        userId,
+        'etablissementId',
+        'Paramètre query manquant',
+        {
+          queryParams: Object.keys(req.query),
+          receivedValue: etablissementId,
+          hint: 'Utilisez: GET /soiree/stats?etablissementId=XXX&date=YYYY-MM-DD'
+        }
+      );
+      return res.status(400).json({ 
+        success: false, 
+        error: 'etablissementId requis',
+        details: 'Fournissez l\'ID de l\'établissement en tant que paramètre query',
+        example: '/soiree/stats?etablissementId=your-id&date=2024-01-15'
+      });
     }
 
     // Récupérer les captures du jour (ou date spécifiée)
@@ -408,6 +532,12 @@ router.get('/soiree/stats', authenticate, async (req, res) => {
     dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(targetDate);
     dayEnd.setHours(23, 59, 59, 999);
+
+    console.log(
+      `[STATS] User: ${userId} | ` +
+      `Etablissement: ${etablissementId} | ` +
+      `Period: ${dayStart.toISOString()} to ${dayEnd.toISOString()}`
+    );
 
     const captures = await AudioCaptureService.findWithRecognition(
       etablissementId as string,
